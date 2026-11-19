@@ -1,0 +1,19 @@
+config = Database, environment, Stripe
+middleware = Authentication, authorization, validation
+routes = API endpoint define
+controllers = Accepts Requests and sends responses
+services = Reusable business logic
+validators = Check request data
+utils = Helper functions
+scripts = Admin, sample data, indexes
+
+একটা উদাহরণ:
+
+POST /api/orders
+- order.routes.js → URL এবং middleware connect করবে।
+- verifyToken.js → User authenticated কি না যাচাই করবে।
+- requireRole.js → Customer কি না যাচাই করবে।
+- order.validator.js → Delivery information validate করবে।
+- order.controller.js → Order তৈরি করবে।
+- MongoDB → Order save করবে।
+এই flow-টাই তোমার পুরো Backend-এর ভিত্তি।
