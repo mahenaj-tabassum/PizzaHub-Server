@@ -1,0 +1,17 @@
+Environment Variables
+```
+PORT=5000
+
+MONGODB_URI=
+DB_NAME=
+
+CLIENT_URL=http://localhost:3000
+
+BETTER_AUTH_URL=http://localhost:3000
+
+STRIPTE_SECRET_KEY=
+STRIPE_WEBHOOK=
+STRIPE_PREMIUM_PRICE_BD=
+
+IMGBB_API_KEY=
+```

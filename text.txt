@@ -17,3 +17,11 @@ POST /api/orders
 - order.controller.js → Order তৈরি করবে।
 - MongoDB → Order save করবে।
 এই flow-টাই তোমার পুরো Backend-এর ভিত্তি।
+
+
+------
+Collections:
+1. users = 	Better Auth পরিচালনা করবে
+2. menuItems = Pizza/ menu information
+3. orders = Customers orders
+4. transactions = Vendor subscription
