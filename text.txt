@@ -25,3 +25,30 @@ Collections:
 2. menuItems = Pizza/ menu information
 3. orders = Customers orders
 4. transactions = Vendor subscription
+
+
+src/app.js => Will configure the express application
+- Express initialize করে	
+- Middleware configure করে	
+- Routes register করে
+- Error handling configure করে	
+- Application export করে
+server.js => Database connect করে server চালু করবে।
+- Server চালু করে
+- Database connection নিশ্চিত করে
+- Port listen করে
+- Startup error handle করে 
+- Application import করে
+
+app.js হলো তোমার application-এর configuration।
+server.js হলো application চালু করার entry point।
+
+
+
+----
+* errorHandler.js
+
+- err → যে error তৈরি হয়েছে।
+- req → incoming request।
+- res → response পাঠানোর object।
+- next → পরবর্তী middleware-এ যাওয়ার function।
