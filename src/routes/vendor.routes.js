@@ -14,11 +14,11 @@ import {
   UpdateMenuItem,
   UpdateMenuItemAvailability,
 } from "../controllers/vendorItem.controller.js";
-import GetVendorStats from "../controllers/vendorStats.controller";
+import GetVendorStats from "../controllers/vendorStats.controller.js";
 const router = Router();
 
 // All routes in this router require an authenticated vendor
-router.unsubscribe(verifyToken, checkIsBlocked, requiredRole("vendor"));
+router.use(verifyToken, checkIsBlocked, requiredRole("vendor"));
 
 // Menu item routes
 router.post("/items", CreateMenuItem);

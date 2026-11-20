@@ -212,7 +212,7 @@ export const UpdateMenuItem = async (req, res, next) => {
 // 5. Delete Item -- DELETE: /api/vendor/items/:id
 export const DeleteMenuItem = async (req, res, next) => {
   try {
-    const menuCollection = await menuCollection("menuItems");
+    const menuCollection = await getCollection("menuItems");
     const vendorId = getVendorId(req.user);
     const { id } = req.params;
 
@@ -227,7 +227,7 @@ export const DeleteMenuItem = async (req, res, next) => {
       _id: new ObjectId(id),
       vendorId,
     });
-    if (result.deleteCount === 0) {
+    if (result.deletedCount === 0) {
       return res.status(404).json({
         success: false,
         message: "Menu item not found",
