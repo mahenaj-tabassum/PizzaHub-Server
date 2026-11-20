@@ -28,6 +28,9 @@ app.use(
   webhookRoutes,
 );
 
+app.get("/", (req, res)=>{
+	res.send("Server is running successfully")
+})
 // 4. Parse incoming JSON requests
 app.use(express.json());
 

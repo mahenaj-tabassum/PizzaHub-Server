@@ -1,11 +1,7 @@
 import { Router } from "express";
+import menuRoutes from "./menu.routes.js";
 const router = Router();
 
-// Future routes will be registered here.
-// Example:
-// router.use("/menu", menuRoutes);
-// router.use("/orders", orderRoutes);
-// router.use("/vendor", vendorRoutes);
-// router.use("/admin", adminRoutes);
+router.use("/menu", menuRoutes);
 
 export default router;
