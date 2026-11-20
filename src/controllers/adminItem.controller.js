@@ -19,7 +19,6 @@ export const GetAllMenuItems = async (req, res, next) => {
     const safeLimit = Math.min(perPage, 50);
     const skip = (currentPage - 1) * safeLimit;
     const filters = [];
-    const query = filters.length ? { $and: filters } : {};
     const menuCollection = await getCollection("menuItems");
 
     if (typeof q !== "string") {
@@ -31,7 +30,7 @@ export const GetAllMenuItems = async (req, res, next) => {
 
     const allowedStatuses = ["pending", "approved", "rejected", "inactive"];
 
-    if (status && allowedStatuses.includes(status)) {
+    if (status && !allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
         message: "Invalid item status",
@@ -68,6 +67,8 @@ export const GetAllMenuItems = async (req, res, next) => {
         ],
       });
     }
+
+    const query = filters.length ? { $and: filters } : {};
 
     const [items, totalItems] = await Promise.all([
       menuCollection

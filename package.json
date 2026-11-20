@@ -2,7 +2,9 @@
   "name": "pizzahub-server",
   "version": "1.0.0",
   "main": "index.js",
-  "devDependencies": {},
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  },
   "type": "module",
   "scripts": {
     "start": "node server.js",
@@ -12,7 +14,6 @@
   "author": "",
   "license": "ISC",
   "description": "",
-
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^18.0.10",

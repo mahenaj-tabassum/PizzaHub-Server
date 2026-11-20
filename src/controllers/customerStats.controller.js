@@ -33,3 +33,5 @@ const GetCustomerStats = async (req, res, next) => {
     next(error);
   }
 };
+
+export default GetCustomerStats
