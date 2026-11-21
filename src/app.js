@@ -13,52 +13,62 @@ const app = express();
 // 1. Security Headers
 app.use(helmet());
 
-// 2. CORS: only the real client (plus localhost while developing).
+// 2. CORS Configuration
 const clientUrl = process.env.CLIENT_URL?.trim().replace(/\/+$/, "");
 
 const allowedOrigins = [
   clientUrl,
-  ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost:3000"]),
+  ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3000"] : []),
 ].filter(Boolean);
 
-// app.use(
-//   cors({
-//     origin: (origin, callback) => {
-//       // No Origin header: Stripe webhooks, Postman, server-to-server calls.
-//       if (!origin) return callback(null, true);
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests without Origin (e.g. server-to-server)
+    if (!origin) {
+      return callback(null, true);
+    }
 
-//       // Disallowed origins simply get no CORS headers (browser blocks them).
-//       return callback(null, allowedOrigins.includes(origin));
-//     },
-//     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-//     allowedHeaders: ["Content-Type", "Authorization"],
-//     maxAge: 86400,
-//   }),
-// );
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-app.use(cors())
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
 
-// 3. Stripe webhook (must come before express.json)
+  credentials: true,
+
+  methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+
+  allowedHeaders: ["Content-Type", "Authorization"],
+
+  maxAge: 86400,
+};
+
+app.use(cors(corsOptions));
+
+// 3. Stripe Webhook
+// Must come before express.json()
 app.use(
   "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
   webhookRoutes,
 );
 
+// 4. Root Route
 app.get("/", (req, res) => {
   res.send("Server is running successfully");
 });
 
-// 4. Parse incoming JSON requests
+// 5. Parse JSON
 app.use(express.json());
 
-// 5. API routes
+// 6. API Routes
 app.use("/api", apiRoutes);
 
-// 6. Handle unknown routes
+// 7. Not Found
 app.use(notFound);
 
-// 7. Global error handler (must be last)
+// 8. Global Error Handler
 app.use(errorHandler);
 
 export default app;
