@@ -158,10 +158,7 @@ export const GetPaymentStatus = async (req, res, next) => {
     const vendorId = getVendorId(req.user);
     const sessionId = req.query.session_id;
 
-    if (
-      typeof sessionId !== "string" ||
-      !sessionId.startsWith("cs_")
-    ) {
+    if (typeof sessionId !== "string" || !sessionId.startsWith("cs_")) {
       return res.status(400).json({
         success: false,
         message: "A valid session_id is required",
@@ -198,15 +195,18 @@ export const GetPaymentStatus = async (req, res, next) => {
         paymentStatus: transaction.status,
         subscriptionPlan: isPremiumActive ? "premium" : "free",
         isPremiumActive,
-        subscriptionExpiresAt:
-          req.user.subscriptionExpiresAt || null,
+        subscriptionExpiresAt: req.user.subscriptionExpiresAt || null,
+
+        // Payment details
+        amount: transaction.amount,
+        currency: transaction.currency,
+        createdAt: transaction.createdAt,
       },
     });
   } catch (error) {
     next(error);
   }
 };
-
 
 // POST /api/payment/portal
 // Vendor manages/cancels their subscription in Stripe Billing Portal.
