@@ -21,20 +21,22 @@ const allowedOrigins = [
   ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost:3000"]),
 ].filter(Boolean);
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // No Origin header: Stripe webhooks, Postman, server-to-server calls.
-      if (!origin) return callback(null, true);
+// app.use(
+//   cors({
+//     origin: (origin, callback) => {
+//       // No Origin header: Stripe webhooks, Postman, server-to-server calls.
+//       if (!origin) return callback(null, true);
 
-      // Disallowed origins simply get no CORS headers (browser blocks them).
-      return callback(null, allowedOrigins.includes(origin));
-    },
-    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    maxAge: 86400,
-  }),
-);
+//       // Disallowed origins simply get no CORS headers (browser blocks them).
+//       return callback(null, allowedOrigins.includes(origin));
+//     },
+//     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+//     allowedHeaders: ["Content-Type", "Authorization"],
+//     maxAge: 86400,
+//   }),
+// );
+
+app.use(cors())
 
 // 3. Stripe webhook (must come before express.json)
 app.use(
