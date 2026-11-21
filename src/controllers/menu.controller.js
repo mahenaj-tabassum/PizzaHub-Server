@@ -20,6 +20,7 @@ import {
   vendorLookupStages,
   vendorShapeStages,
 } from "../services/menuVendor.service.js";
+import { GetMenuLocationsService } from "../services/menuService.service.js";
 
 // GET: /api/menu
 const GetAllMenuItems = async (req, res, next) => {
@@ -148,5 +149,27 @@ const GetSingleMenuItem = async (req, res, next) => {
     next(error);
   }
 };
+const GetMenuLocations = async (req, res, next) => {
+  try {
+    // Get MongoDB menuItems collection
+    const menuCollection = await getCollection("menuItems");
 
-export { GetAllMenuItems, GetFeaturedMenuItems, GetSingleMenuItem };
+    // Retrieve unique locations
+    const locations = await GetMenuLocationsService(menuCollection);
+
+    return res.status(200).json({
+      success: true,
+      message: "Locations retrieved successfully",
+      data: locations,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export {
+  GetAllMenuItems,
+  GetFeaturedMenuItems,
+  GetSingleMenuItem,
+  GetMenuLocations,
+};
