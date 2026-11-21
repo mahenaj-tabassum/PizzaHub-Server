@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-// Common reusable fields.
 const menuItemFields = {
   itemName: z
     .string()

@@ -124,9 +124,8 @@ const createIndexes = async () => {
   await transactions.createIndex(
     { stripeSubscriptionId: 1 },
     {
-      unique: true,
       sparse: true,
-      name: "transactions_stripe_subscription_unique",
+      name: "transactions_stripe_subscription_idx",
     },
   );
 
