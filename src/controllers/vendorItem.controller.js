@@ -1,5 +1,4 @@
 import { ObjectId } from "mongodb";
-
 import { getCollection, getMongoClient } from "../config/db.js";
 
 import {
@@ -9,24 +8,23 @@ import {
   SUBSCRIPTION_PLANS,
 } from "../utils/constants.js";
 
-// Authenticated vendor identity.
-// Never use vendorId from req.body.
-const getVendorId = (user) => {
-  return String(user.id || user._id);
-};
+// Always take vendor identity from the authenticated database user.
+// Never trust vendorId from request body or URL.
+const getVendorId = (user) => String(user.id || user._id);
 
 const getVendorDatabaseId = (user) => user._id;
 
+const isValidItemId = (id) =>
+  typeof id === "string" && /^[0-9a-fA-F]{24}$/.test(id);
+
 const isActivePremium = (vendor) => {
+  const expiry = vendor.subscriptionExpiresAt;
+
   return (
     vendor.subscriptionPlan === SUBSCRIPTION_PLANS.PREMIUM &&
-    vendor.subscriptionExpiresAt instanceof Date &&
-    vendor.subscriptionExpiresAt > new Date()
+    expiry instanceof Date &&
+    expiry.getTime() > Date.now()
   );
-};
-
-const isValidItemId = (id) => {
-  return typeof id === "string" && /^[0-9a-fA-F]{24}$/.test(id);
 };
 
 class VendorItemError extends Error {
@@ -37,9 +35,15 @@ class VendorItemError extends Error {
   }
 }
 
-// Lock the vendor document inside the transaction.
-// Concurrent quota-changing operations for this vendor
-// will conflict and MongoDB can retry the transaction.
+const sendVendorItemError = (res, error) =>
+  res.status(error.status).json({
+    success: false,
+    message: error.message,
+  });
+
+// Every operation that can increase/decrease active item count
+// writes to the vendor document inside the same transaction.
+// This serializes concurrent quota-changing operations.
 const lockVendorQuota = async (usersCollection, vendor, session) => {
   const result = await usersCollection.updateOne(
     { _id: vendor._id },
@@ -56,7 +60,17 @@ const lockVendorQuota = async (usersCollection, vendor, session) => {
   }
 };
 
-// Check whether this vendor can add one more active listing.
+const countActiveVendorItems = async (menuCollection, vendorId, session) => {
+  return menuCollection.countDocuments(
+    {
+      vendorId,
+      status: { $in: ACTIVE_MENU_ITEM_STATUSES },
+      isAvailable: true,
+    },
+    { session },
+  );
+};
+
 const enforceVendorItemLimit = async ({
   vendor,
   vendorId,
@@ -64,24 +78,18 @@ const enforceVendorItemLimit = async ({
   menuCollection,
   session,
 }) => {
-  // Lock first so simultaneous requests cannot both
-  // pass the same count check.
+  // Must happen before counting, inside the same transaction.
   await lockVendorQuota(usersCollection, vendor, session);
 
-  // Premium vendors have no active item limit.
+  // Active Premium subscription has no item limit.
   if (isActivePremium(vendor)) {
     return;
   }
 
-  const activeCount = await menuCollection.countDocuments(
-    {
-      vendorId,
-      status: {
-        $in: ACTIVE_MENU_ITEM_STATUSES,
-      },
-      isAvailable: true,
-    },
-    { session },
+  const activeCount = await countActiveVendorItems(
+    menuCollection,
+    vendorId,
+    session,
   );
 
   if (activeCount >= FREE_VENDOR_ACTIVE_ITEM_LIMIT) {
@@ -92,21 +100,38 @@ const enforceVendorItemLimit = async ({
   }
 };
 
-// 1. Create item
-// POST /api/vendor/items
-export const CreateMenuItem = async (req, res, next) => {
-  const client = await getMongoClient();
+// Use this helper for all transaction-based quota operations.
+// Session creation is inside try/catch at the controller level.
+const runQuotaTransaction = async (client, callback) => {
   const session = client.startSession();
 
   try {
+    return await session.withTransaction(() => callback(session), {
+      readConcern: { level: "snapshot" },
+      writeConcern: { w: "majority" },
+      readPreference: "primary",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// -----------------------------------------------------------------------------
+// POST /api/vendor/items
+// Create a menu item. Pending items consume a Free-plan slot.
+// -----------------------------------------------------------------------------
+export const CreateMenuItem = async (req, res, next) => {
+  try {
+    const client = await getMongoClient();
     const vendorId = getVendorId(req.user);
 
     const usersCollection = await getCollection("users");
     const menuCollection = await getCollection("menuItems");
 
+    const now = new Date();
+
     const newItem = {
       vendorId,
-
       itemName: req.body.itemName,
       category: req.body.category,
       description: req.body.description,
@@ -117,20 +142,20 @@ export const CreateMenuItem = async (req, res, next) => {
       status: MENU_ITEM_STATUS.PENDING,
       isAvailable: true,
 
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     };
 
     let insertedId;
 
-    await session.withTransaction(async () => {
-      // Always load the latest vendor record from DB.
+    await runQuotaTransaction(client, async (session) => {
+      // Read the latest subscription data inside the transaction.
       const vendor = await usersCollection.findOne(
         { _id: getVendorDatabaseId(req.user) },
         { session },
       );
 
-      if (!vendor) {
+      if (!vendor || vendor.role !== "vendor") {
         throw new VendorItemError("Vendor account not found", 404);
       }
 
@@ -143,7 +168,6 @@ export const CreateMenuItem = async (req, res, next) => {
       });
 
       const result = await menuCollection.insertOne(newItem, { session });
-
       insertedId = result.insertedId;
     });
 
@@ -157,20 +181,17 @@ export const CreateMenuItem = async (req, res, next) => {
     });
   } catch (error) {
     if (error instanceof VendorItemError) {
-      return res.status(error.status).json({
-        success: false,
-        message: error.message,
-      });
+      return sendVendorItemError(res, error);
     }
 
-    next(error);
-  } finally {
-    await session.endSession();
+    return next(error);
   }
 };
 
-// 2. Get vendor's own items
+// -----------------------------------------------------------------------------
 // GET /api/vendor/items
+// Get only the authenticated vendor's own items.
+// -----------------------------------------------------------------------------
 export const GetMyMenuItem = async (req, res, next) => {
   try {
     const vendorId = getVendorId(req.user);
@@ -188,15 +209,16 @@ export const GetMyMenuItem = async (req, res, next) => {
       totalItems: items.length,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// 3. Get one vendor-owned item
+// -----------------------------------------------------------------------------
 // GET /api/vendor/items/:id
+// Get one item only if it belongs to the authenticated vendor.
+// -----------------------------------------------------------------------------
 export const GetMySingleMenuItem = async (req, res, next) => {
   try {
-    const vendorId = getVendorId(req.user);
     const { id } = req.params;
 
     if (!isValidItemId(id)) {
@@ -206,6 +228,7 @@ export const GetMySingleMenuItem = async (req, res, next) => {
       });
     }
 
+    const vendorId = getVendorId(req.user);
     const menuCollection = await getCollection("menuItems");
 
     const item = await menuCollection.findOne({
@@ -226,15 +249,17 @@ export const GetMySingleMenuItem = async (req, res, next) => {
       data: item,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// 4. Update vendor-owned item
+// -----------------------------------------------------------------------------
 // PATCH /api/vendor/items/:id
+// Content changes always reset status to pending.
+// Inactive/deleted items cannot be edited or restored through this endpoint.
+// -----------------------------------------------------------------------------
 export const UpdateMenuItem = async (req, res, next) => {
   try {
-    const vendorId = getVendorId(req.user);
     const { id } = req.params;
 
     if (!isValidItemId(id)) {
@@ -244,21 +269,20 @@ export const UpdateMenuItem = async (req, res, next) => {
       });
     }
 
+    const vendorId = getVendorId(req.user);
     const menuCollection = await getCollection("menuItems");
 
-    // Only validated content fields can reach this controller.
     const updates = {
       ...req.body,
-      updatedAt: new Date(),
-
-      // Any content change requires admin re-approval.
       status: MENU_ITEM_STATUS.PENDING,
+      updatedAt: new Date(),
     };
 
     const result = await menuCollection.updateOne(
       {
         _id: new ObjectId(id),
         vendorId,
+        status: { $ne: MENU_ITEM_STATUS.INACTIVE },
       },
       {
         $set: updates,
@@ -268,7 +292,7 @@ export const UpdateMenuItem = async (req, res, next) => {
     if (result.matchedCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "Menu item not found",
+        message: "Menu item not found or already deleted",
       });
     }
 
@@ -283,15 +307,16 @@ export const UpdateMenuItem = async (req, res, next) => {
       data: updatedItem,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// 5. Soft delete item
+// -----------------------------------------------------------------------------
 // DELETE /api/vendor/items/:id
+// Soft delete. Deleted items no longer consume an active item slot.
+// -----------------------------------------------------------------------------
 export const DeleteMenuItem = async (req, res, next) => {
   try {
-    const vendorId = getVendorId(req.user);
     const { id } = req.params;
 
     if (!isValidItemId(id)) {
@@ -301,22 +326,22 @@ export const DeleteMenuItem = async (req, res, next) => {
       });
     }
 
+    const vendorId = getVendorId(req.user);
     const menuCollection = await getCollection("menuItems");
+    const now = new Date();
 
     const result = await menuCollection.updateOne(
       {
         _id: new ObjectId(id),
         vendorId,
-        status: {
-          $ne: MENU_ITEM_STATUS.INACTIVE,
-        },
+        status: { $ne: MENU_ITEM_STATUS.INACTIVE },
       },
       {
         $set: {
           status: MENU_ITEM_STATUS.INACTIVE,
           isAvailable: false,
-          deletedAt: new Date(),
-          updatedAt: new Date(),
+          deletedAt: now,
+          updatedAt: now,
         },
       },
     );
@@ -333,17 +358,17 @@ export const DeleteMenuItem = async (req, res, next) => {
       message: "Menu item deleted successfully",
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// 6. Update item availability
+// -----------------------------------------------------------------------------
 // PATCH /api/vendor/items/:id/status
+// Availability changes are quota-sensitive and must be transactional.
+// -----------------------------------------------------------------------------
 export const UpdateMenuItemAvailability = async (req, res, next) => {
-  const client = await getMongoClient();
-  const session = client.startSession();
-
   try {
+    const client = await getMongoClient();
     const vendorId = getVendorId(req.user);
     const { id } = req.params;
     const { isAvailable } = req.body;
@@ -355,18 +380,18 @@ export const UpdateMenuItemAvailability = async (req, res, next) => {
       });
     }
 
-    const menuCollection = await getCollection("menuItems");
     const usersCollection = await getCollection("users");
+    const menuCollection = await getCollection("menuItems");
 
     let updatedItem;
 
-    await session.withTransaction(async () => {
+    await runQuotaTransaction(client, async (session) => {
       const vendor = await usersCollection.findOne(
         { _id: getVendorDatabaseId(req.user) },
         { session },
       );
 
-      if (!vendor) {
+      if (!vendor || vendor.role !== "vendor") {
         throw new VendorItemError("Vendor account not found", 404);
       }
 
@@ -378,10 +403,11 @@ export const UpdateMenuItemAvailability = async (req, res, next) => {
         { session },
       );
 
-      if (!item) {
+      if (!item || item.status === MENU_ITEM_STATUS.INACTIVE) {
         throw new VendorItemError("Menu item not found", 404);
       }
 
+      // Activating a pending/rejected item is not allowed.
       if (isAvailable && item.status !== MENU_ITEM_STATUS.APPROVED) {
         throw new VendorItemError(
           "Only admin-approved items can be activated",
@@ -389,8 +415,8 @@ export const UpdateMenuItemAvailability = async (req, res, next) => {
         );
       }
 
-      // Only activating an unavailable item consumes a new slot.
-      if (isAvailable && !item.isAvailable) {
+      // Only a real transition from unavailable -> available consumes a slot.
+      if (isAvailable && item.isAvailable !== true) {
         await enforceVendorItemLimit({
           vendor,
           vendorId,
@@ -399,14 +425,16 @@ export const UpdateMenuItemAvailability = async (req, res, next) => {
           session,
         });
       } else {
-        // Serialize deactivation with other quota operations too.
+        // Serialize deactivation and no-op activation with quota operations.
         await lockVendorQuota(usersCollection, vendor, session);
       }
 
-      await menuCollection.updateOne(
+      const result = await menuCollection.updateOne(
         {
           _id: new ObjectId(id),
           vendorId,
+          status: item.status,
+          isAvailable: item.isAvailable,
         },
         {
           $set: {
@@ -416,6 +444,13 @@ export const UpdateMenuItemAvailability = async (req, res, next) => {
         },
         { session },
       );
+
+      if (result.matchedCount !== 1) {
+        throw new VendorItemError(
+          "Menu item changed during this request. Please try again.",
+          409,
+        );
+      }
 
       updatedItem = await menuCollection.findOne(
         {
@@ -433,14 +468,9 @@ export const UpdateMenuItemAvailability = async (req, res, next) => {
     });
   } catch (error) {
     if (error instanceof VendorItemError) {
-      return res.status(error.status).json({
-        success: false,
-        message: error.message,
-      });
+      return sendVendorItemError(res, error);
     }
 
-    next(error);
-  } finally {
-    await session.endSession();
+    return next(error);
   }
 };

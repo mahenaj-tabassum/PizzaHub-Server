@@ -1,31 +1,51 @@
 import { ObjectId } from "mongodb";
 import { getCollection } from "../config/db.js";
 
-// Get authenticated customer's ID
-const getCustomerId = (user) => {
-  return String(user.id || user._id);
+const getCustomerId = (user) => String(user.id || user._id);
+
+const isValidObjectId = (id) =>
+  typeof id === "string" && /^[0-9a-fA-F]{24}$/.test(id);
+
+const createActiveOrderKey = (customerId, itemId, deliveryDate) =>
+  JSON.stringify([customerId, itemId, deliveryDate]);
+
+const findVendorById = async (usersCollection, vendorId) => {
+  const conditions = [{ id: vendorId }, { _id: vendorId }];
+
+  if (isValidObjectId(vendorId)) {
+    conditions.push({ _id: new ObjectId(vendorId) });
+  }
+
+  return usersCollection.findOne({
+    $or: conditions,
+    role: "vendor",
+  });
 };
 
-// Generate a unique key for an active order
-const createActiveOrderKey = (customerId, itemId, deliveryDate) => {
-  return JSON.stringify([customerId, itemId, deliveryDate]);
-};
-
-// 1. Create Order
-// POST: /api/orders
-
+// -----------------------------------------------------------------------------
+// POST /api/orders
+// Create an order for an approved and available menu item.
+// -----------------------------------------------------------------------------
 export const CreateOrder = async (req, res, next) => {
   try {
-    const menuCollection = await getCollection("menuItems");
-    const orderCollection = await getCollection("orders");
+    const { itemId, deliveryDate, deliveryAddress, message = "" } = req.body;
+
+    if (!isValidObjectId(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid menu item ID",
+      });
+    }
 
     const customerId = getCustomerId(req.user);
 
-    const { itemId, deliveryDate, deliveryAddress, message = "" } = req.body;
-
-    // 1. Find approved and available menu item
+    const menuCollection = await getCollection("menuItems");
+    const usersCollection = await getCollection("users");
+    const orderCollection = await getCollection("orders");
+    const normalizedItemId = itemId.toLowerCase();
+    // 1. Only approved and available items can be ordered.
     const item = await menuCollection.findOne({
-      _id: new ObjectId(itemId),
+      _id: new ObjectId(normalizedItemId),
       status: "approved",
       isAvailable: true,
     });
@@ -37,53 +57,70 @@ export const CreateOrder = async (req, res, next) => {
       });
     }
 
-    // 2. Prevent ordering own menu item
-    if (String(item.vendorId) === customerId) {
+    const vendorId = String(item.vendorId);
+
+    // 2. Prevent a vendor from ordering their own menu item.
+    if (vendorId === customerId) {
       return res.status(403).json({
         success: false,
         message: "You cannot order your own menu item",
       });
     }
 
-    // 3. Generate unique active order key
+    // 3. Verify that the referenced vendor still exists.
+    const vendor = await findVendorById(usersCollection, vendorId);
+
+    if (!vendor) {
+      return res.status(409).json({
+        success: false,
+        message: "The vendor for this menu item is no longer available",
+      });
+    }
+
+    // 4. Generate a deterministic key for duplicate active-order protection.
     const activeOrderKey = createActiveOrderKey(
       customerId,
-      itemId,
+      normalizedItemId,
       deliveryDate,
     );
 
-    // 4. Create order document
+    const now = new Date();
+
+    // 5. Save item/vendor snapshots so order history remains meaningful
+    // even if the menu item or vendor profile changes later.
     const newOrder = {
-      itemId,
+      normalizedItemId,
 
-      // Vendor ID comes from database
-      vendorId: String(item.vendorId),
-
-      // Customer ID comes from authenticated user
+      vendorId,
       customerId,
 
-      // Save item information at order time
       itemSnapshot: {
         itemName: item.itemName,
+        category: item.category,
         price: item.price,
         images: Array.isArray(item.images) ? item.images : [],
+        location: item.location,
+      },
+
+      vendorSnapshot: {
+        name: vendor.name || "",
+        businessName: vendor.businessName || "",
+        image: vendor.image || null,
       },
 
       deliveryDate,
       deliveryAddress: deliveryAddress.trim(),
-      message: message.trim(),
+      message: typeof message === "string" ? message.trim() : "",
 
-      // Pending by default
       status: "pending",
-
-      // Used for duplicate active order protection
       activeOrderKey,
 
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     };
 
-    // 5. Insert order
+    // 6. The unique partial index is the final protection against
+    // simultaneous duplicate requests.
     try {
       const result = await orderCollection.insertOne(newOrder);
 
@@ -96,7 +133,6 @@ export const CreateOrder = async (req, res, next) => {
         },
       });
     } catch (error) {
-      // Unique index conflict
       if (error.code === 11000) {
         return res.status(409).json({
           success: false,
@@ -108,54 +144,53 @@ export const CreateOrder = async (req, res, next) => {
       throw error;
     }
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// 2. Get My Orders
-// GET: /api/orders/my-orders
-
+// -----------------------------------------------------------------------------
+// GET /api/orders/my-orders
+// Return only the authenticated customer's orders.
+// -----------------------------------------------------------------------------
 export const GetMyOrders = async (req, res, next) => {
   try {
     const customerId = getCustomerId(req.user);
-
     const orderCollection = await getCollection("orders");
 
     const orders = await orderCollection
       .find({ customerId })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .toArray();
 
     return res.status(200).json({
       success: true,
       message: "Your orders retrieved successfully",
       data: orders,
+      totalOrders: orders.length,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// 3. Get Single Order Details
-// GET: /api/orders/:id
-
+// -----------------------------------------------------------------------------
+// GET /api/orders/:id
+// Return an order only if it belongs to the authenticated customer.
+// -----------------------------------------------------------------------------
 export const GetOrderDetails = async (req, res, next) => {
   try {
-    const customerId = getCustomerId(req.user);
-
     const { id } = req.params;
 
-    // Validate MongoDB ObjectId
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid order ID",
       });
     }
 
+    const customerId = getCustomerId(req.user);
     const orderCollection = await getCollection("orders");
 
-    // Only find an order belonging to this customer
     const order = await orderCollection.findOne({
       _id: new ObjectId(id),
       customerId,
@@ -174,30 +209,28 @@ export const GetOrderDetails = async (req, res, next) => {
       data: order,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// 4. Cancel Pending Order
-// PATCH: /api/orders/:id/cancel
-
+// -----------------------------------------------------------------------------
+// PATCH /api/orders/:id/cancel
+// Only the owner can cancel, and only while status is pending.
+// -----------------------------------------------------------------------------
 export const CancelOrder = async (req, res, next) => {
   try {
-    const orderCollection = await getCollection("orders");
-
-    const customerId = getCustomerId(req.user);
-
     const { id } = req.params;
 
-    // Validate order ID
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid order ID",
       });
     }
 
-    // Only pending orders belonging to this customer can be cancelled
+    const customerId = getCustomerId(req.user);
+    const orderCollection = await getCollection("orders");
+
     const result = await orderCollection.updateOne(
       {
         _id: new ObjectId(id),
@@ -216,13 +249,12 @@ export const CancelOrder = async (req, res, next) => {
     );
 
     if (result.matchedCount === 0) {
-      // Check whether the order belongs to this customer
-      const order = await orderCollection.findOne({
+      const existingOrder = await orderCollection.findOne({
         _id: new ObjectId(id),
         customerId,
       });
 
-      if (!order) {
+      if (!existingOrder) {
         return res.status(404).json({
           success: false,
           message: "Order not found",
@@ -231,7 +263,7 @@ export const CancelOrder = async (req, res, next) => {
 
       return res.status(409).json({
         success: false,
-        message: `This order cannot be cancelled because its status is ${order.status}`,
+        message: `This order cannot be cancelled because its status is ${existingOrder.status}`,
       });
     }
 
@@ -240,6 +272,6 @@ export const CancelOrder = async (req, res, next) => {
       message: "Order cancelled successfully",
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };

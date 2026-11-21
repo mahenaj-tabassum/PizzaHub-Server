@@ -4,8 +4,12 @@ import verifyToken from "../middleware/verifyToken.js";
 import checkBlocked from "../middleware/checkBlocked.js";
 import requireRole from "../middleware/requireRole.js";
 import validate from "../middleware/validate.js";
+import GetVendorStats from "../controllers/vendorStats.controller.js";
+import CreatePremiumCheckoutSession from "../controllers/subscription.controller.js";
 
 import { ROLES } from "../utils/constants.js";
+
+import { updateVendorOrderStatusSchema } from "../validators/vendorOrder.validator.js";
 
 import {
   createMenuItemSchema,
@@ -27,7 +31,6 @@ import {
   UpdateVendorOrderStatus,
 } from "../controllers/vendorOrder.controller.js";
 
-import GetVendorStats from "../controllers/vendorStats.controller.js";
 
 const router = Router();
 
@@ -55,9 +58,14 @@ router.patch(
 // Vendor order management
 router.get("/orders", GetVendorOrders);
 
-router.patch("/orders/:id/status", UpdateVendorOrderStatus);
-
+router.patch(
+  "/orders/:id/status",
+  validate(updateVendorOrderStatusSchema),
+  UpdateVendorOrderStatus,
+);
 // Vendor dashboard statistics
 router.get("/stats", GetVendorStats);
+
+router.post('/subscription/checkout', CreatePremiumCheckoutSession)
 
 export default router;

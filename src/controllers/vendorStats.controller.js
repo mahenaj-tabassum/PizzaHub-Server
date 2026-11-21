@@ -1,54 +1,99 @@
-/**
- * Vendor Dashboard Statistics
- *
- * Endpoint: GET /api/vendor/stats
- *
- * Responsibilities:
- * - Retrieve the authenticated vendor's ID from req.user.
- * - Count the vendor's total menu items.
- * - Count active menu items (approved and currently available).
- * - Count pending customer orders.
- * - Count accepted customer orders.
- * - Retrieve the vendor's current subscription plan.
- * - Return all statistics in a structured JSON response.
- * - Ensure vendors can only access their own statistics.
- * - Handle database errors appropriately.
- */
-
 import { getCollection } from "../config/db.js";
+
+const getVendorId = (user) => {
+  return String(user.id || user._id);
+};
+
+const getCurrentSubscriptionPlan = (vendor) => {
+  const plan = vendor.subscriptionPlan || "free";
+
+  if (plan !== "premium") {
+    return "free";
+  }
+
+  if (!vendor.subscriptionExpiresAt) {
+    return "free";
+  }
+
+  const expiryDate = new Date(vendor.subscriptionExpiresAt);
+
+  if (Number.isNaN(expiryDate.getTime())) {
+    return "free";
+  }
+
+  return expiryDate > new Date() ? "premium" : "free";
+};
+
+// GET: /api/vendor/stats
 const GetVendorStats = async (req, res, next) => {
   try {
-    const vendorId = String(req.user.id || req.user._id);
-    const menuCollection = await getCollection("menuItems");
-    const orderCollection = await getCollection("orders");
-    const usersCollection = await getCollection("users");
-
-    const [totalItems, activeItems, pendingOrders, acceptedOrders, vendor] =
-      await Promise.all([
-        menuCollection.countDocuments({ vendorId }),
-        menuCollection.countDocuments({
-          vendorId,
-          status: "approved",
-          isAvailable: true,
-        }),
-        orderCollection.countDocuments({ vendorId, status: "pending" }),
-        orderCollection.countDocuments({ vendorId, status: "accepted" }),
-        usersCollection.findOne({ $or: [{ id: vendorId }, { _id: vendorId }] }),
-      ]);
-    if (!vendor) {
-      return res.status(404).json({
+    if (!req.user || req.user.role !== "vendor") {
+      return res.status(403).json({
         success: false,
-        message: "Vendor account not found",
+        message: "Vendor access is required",
       });
     }
-    res.status(200).json({
+
+    const vendorId = getVendorId(req.user);
+
+    if (!vendorId || vendorId === "undefined") {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid vendor identity",
+      });
+    }
+
+    const menuCollection = await getCollection("menuItems");
+    const orderCollection = await getCollection("orders");
+
+    const [
+      totalItems,
+      activeItems,
+      pendingOrders,
+      acceptedOrders,
+      rejectedOrders,
+    ] = await Promise.all([
+      // All menu items created by this vendor.
+      menuCollection.countDocuments({
+        vendorId,
+      }),
+
+      // Publicly active menu items.
+      menuCollection.countDocuments({
+        vendorId,
+        status: "approved",
+        isAvailable: true,
+      }),
+
+      orderCollection.countDocuments({
+        vendorId,
+        status: "pending",
+      }),
+
+      orderCollection.countDocuments({
+        vendorId,
+        status: "accepted",
+      }),
+
+      orderCollection.countDocuments({
+        vendorId,
+        status: "rejected",
+      }),
+    ]);
+
+    const subscriptionPlan = getCurrentSubscriptionPlan(req.user);
+
+    return res.status(200).json({
       success: true,
+      message: "Vendor statistics retrieved successfully",
       data: {
         totalItems,
         activeItems,
         pendingOrders,
         acceptedOrders,
-        subscriptionPlan: vendor.subscriptionPlan || "free",
+        rejectedOrders,
+        subscriptionPlan,
+        subscriptionExpiresAt: req.user.subscriptionExpiresAt || null,
       },
     });
   } catch (error) {
