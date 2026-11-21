@@ -8,11 +8,12 @@ import {
   GetMyOrders,
   GetOrderDetails,
 } from "../controllers/order.controller.js";
+import { ROLES } from "../utils/constants.js";
 
 const router = Router();
 
 // All order routes require an authenticated customer
-router.use(verifyToken, checkBlocked, requireRole("customer"));
+router.use(verifyToken, checkBlocked, requireRole(ROLES.CUSTOMER));
 
 router.post("/", CreateOrder);
 router.get("/my-orders", GetMyOrders);

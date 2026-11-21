@@ -19,12 +19,12 @@ import {
   UpdateMenuItemStatus,
   DeleteMenuItem,
 } from "../controllers/adminItem.controller.js";
+import { ROLES } from "../utils/constants.js";
 
 const router = Router();
 
 // Every admin endpoints must pass all three middlewares
-router.use(verifyToken, checkBlocked, requireRole("admin"));
-
+router.use(verifyToken, checkBlocked, requireRole(ROLES.ADMIN));
 // Admin Statistics
 router.get("/stats", GetAdminStats);
 

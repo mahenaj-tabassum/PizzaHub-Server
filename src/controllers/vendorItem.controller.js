@@ -1,5 +1,6 @@
 import { ObjectId } from "mongodb";
 import { getCollection } from "../config/db.js";
+import { isValidObjectId } from "../utils/objectId.js";
 
 const getVendorId = (user) => String(user.id || user._id);
 
@@ -86,10 +87,10 @@ export const GetMySingleMenuItem = async (req, res, next) => {
     const menuCollection = await getCollection("menuItems");
     const { id } = req.params;
 
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid menu item ID",
+        message: "Invalid ID",
       });
     }
 
@@ -120,10 +121,10 @@ export const UpdateMenuItem = async (req, res, next) => {
     const vendorId = getVendorId(req.user);
     const { id } = req.params;
 
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid menu item ID",
+        message: "Invalid ID",
       });
     }
 
@@ -216,13 +217,12 @@ export const DeleteMenuItem = async (req, res, next) => {
     const vendorId = getVendorId(req.user);
     const { id } = req.params;
 
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid menu item ID",
+        message: "Invalid ID",
       });
     }
-
     const result = await menuCollection.deleteOne({
       _id: new ObjectId(id),
       vendorId,
@@ -252,13 +252,12 @@ export const UpdateMenuItemAvailability = async (req, res, next) => {
     const { id } = req.params;
     const { isAvailable } = req.body;
 
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid menu item ID",
+        message: "Invalid ID",
       });
     }
-
     if (typeof isAvailable !== "boolean") {
       return res.status(400).json({
         success: false,

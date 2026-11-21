@@ -1,5 +1,6 @@
 import { ObjectId } from "mongodb";
 import { getCollection } from "../config/db.js";
+import { isValidObjectId } from "../utils/objectId.js";
 
 const getVendorId = (user) => String(user.id || user._id);
 
@@ -32,10 +33,10 @@ export const UpdateVendorOrderStatus = async (req, res, next) => {
     const { status } = req.body;
     const { id } = req.params;
 
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid order ID",
+        message: "Invalid ID",
       });
     }
 

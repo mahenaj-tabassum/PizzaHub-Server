@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { getCollection } from "../config/db.js";
 import { isValidDeliveryDate } from "../utils/dateValidation.js";
+import { isValidObjectId } from "../utils/objectId.js";
 const getCustomerId = (user) => String(user.id || user._id);
 
 // 1. Create Order  -- POST: /api/orders
@@ -116,10 +117,10 @@ export const GetOrderDetails = async (req, res, next) => {
     const orderCollection = await getCollection("orders");
     const { id } = req.params;
 
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid order ID",
+        message: "Invalid ID",
       });
     }
 
@@ -152,10 +153,10 @@ export const CancelOrder = async (req, res, next) => {
     const customerId = getCustomerId(req.user);
     const { id } = req.params;
 
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid order ID",
+        message: "Invalid ID",
       });
     }
 

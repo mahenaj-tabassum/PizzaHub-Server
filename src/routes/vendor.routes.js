@@ -15,10 +15,11 @@ import {
   UpdateMenuItemAvailability,
 } from "../controllers/vendorItem.controller.js";
 import GetVendorStats from "../controllers/vendorStats.controller.js";
+import { ROLES } from "../utils/constants.js";
 const router = Router();
 
 // All routes in this router require an authenticated vendor
-router.use(verifyToken, checkIsBlocked, requiredRole("vendor"));
+router.use(verifyToken, checkIsBlocked, requiredRole(ROLES.VENDOR));
 
 // Menu item routes
 router.post("/items", CreateMenuItem);
@@ -35,5 +36,4 @@ router.patch("/orders/:id/status", UpdateVendorOrderStatus);
 // Dashboard statistics
 router.get("/stats", GetVendorStats);
 
-
-export default router
+export default router;

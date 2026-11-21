@@ -14,6 +14,7 @@ import {
   getMenuSort,
   getPagination,
 } from "../services/menuQuery.service.js";
+import { isValidObjectId } from "../utils/objectId.js";
 
 // GET: /api/menu
 const GetAllMenuItems = async (req, res, next) => {
@@ -84,10 +85,10 @@ const GetSingleMenuItem = async (req, res, next) => {
     const { id } = req.params;
 
     // Validate MongoDB ObjectId
-    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid menu item ID",
+        message: "Invalid ID",
       });
     }
     const menuCollection = await getCollection("menuItems");
