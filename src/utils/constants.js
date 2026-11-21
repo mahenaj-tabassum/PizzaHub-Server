@@ -39,3 +39,17 @@ export const ALLOWED_PUBLIC_ROLES = Object.freeze([
   ROLES.VENDOR,
   ROLES.CUSTOMER,
 ]);
+
+export const MENU_ITEM_STATUS = Object.freeze({
+  PENDING: "pending",
+  APPROVED: "approved",
+  REJECTED: "rejected",
+  INACTIVE: "inactive",
+});
+
+export const ACTIVE_MENU_ITEM_STATUSES = Object.freeze([
+  MENU_ITEM_STATUS.PENDING,
+  MENU_ITEM_STATUS.APPROVED,
+]);
+
+export const FREE_VENDOR_ACTIVE_ITEM_LIMIT = 3;

@@ -15,48 +15,37 @@ const client = new MongoClient(uri);
 
 let clientPromise = null;
 
-export const connectToMongoDB = async () => {
-  if (!clientPromise) {
-    clientPromise = (async () => {
-      await client.connect();
+const connectToMongoDB = async () => {
+  try {
+    if (!clientPromise) {
+      clientPromise = client.connect().catch((error) => {
+        clientPromise = null;
+        throw error;
+      });
+    }
 
-      const database = client.db(dbName);
+    await clientPromise;
 
-      // Verify that the connection is working.
-      await database.command({ ping: 1 });
-
-      console.log(`Connected to MongoDB database: ${dbName}`);
-
-      return database;
-    })().catch((error) => {
-      clientPromise = null;
-      console.error("MongoDB connection failed:", error.message);
-      throw error;
-    });
+    return client.db(dbName);
+  } catch (error) {
+    console.error("MongoDB connection failed:", error.message);
+    throw error;
   }
-
-  return clientPromise;
 };
 
-export const getCollection = async (collectionName) => {
-  const allowedCollections = ["users", "menuItems", "orders", "transactions"];
+const getMongoClient = async () => {
+  await connectToMongoDB();
+  return client;
+};
 
-  if (!allowedCollections.includes(collectionName)) {
-    throw new Error(`Invalid business collection: ${collectionName}`);
-  }
-
+const getCollection = async (collectionName) => {
   const database = await connectToMongoDB();
-
   return database.collection(collectionName);
 };
 
-export const closeDB = async () => {
-  if (!databasePromise) return;
-
-  try {
-    await client.close();
-    console.log("MongoDB connection closed");
-  } finally {
-    databasePromise = null;
-  }
+const closeDB = async () => {
+  await client.close();
+  clientPromise = null;
 };
+
+export { connectToMongoDB, getMongoClient, getCollection, closeDB };

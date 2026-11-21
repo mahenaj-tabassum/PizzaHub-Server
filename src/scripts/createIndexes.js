@@ -95,15 +95,13 @@ const createIndexes = async () => {
     { name: "orders_vendor_status_createdAt" },
   );
 
-  // Supports duplicate active-order lookup.
   await orders.createIndex(
+    { activeOrderKey: 1 },
     {
-      customerId: 1,
-      itemId: 1,
-      deliveryDate: 1,
-      status: 1,
+      unique: true,
+      partialFilterExpression: { activeOrderKey: { $type: "string" } },
+      name: "orders_active_order_unique",
     },
-    { name: "orders_duplicate_check" },
   );
 
   // 4. TRANSACTIONS
@@ -133,13 +131,13 @@ const createIndexes = async () => {
   );
 
   console.log("All PizzaHub database indexes are ready.");
-
-  try {
-    await createIndexes();
-  } catch (error) {
-    console.error("Index creation failed:", error);
-    process.exitCode = 1;
-  } finally {
-    await closeDB();
-  }
 };
+
+try {
+  await createIndexes();
+} catch (error) {
+  console.error("Index creation failed:", error);
+  process.exitCode = 1;
+} finally {
+  await closeDB();
+}
