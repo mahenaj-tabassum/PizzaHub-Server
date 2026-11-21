@@ -2,36 +2,61 @@ import { MongoClient } from "mongodb";
 
 const uri = process.env.MONGODB_URI;
 const dbName = process.env.DB_NAME;
-let clientPromise;
 
 if (!uri) {
   throw new Error("MONGODB_URI is missing from environment variables");
 }
+
 if (!dbName) {
   throw new Error("DB_NAME is missing from environment variables");
 }
 
 const client = new MongoClient(uri);
 
-const connectToMongoDB = async () => {
-  try {
-    if (!clientPromise) {
-      clientPromise = client.connect();
-    }
-    await clientPromise;
-    console.log("You successfully connected to MongoDB!");
-    return client.db(dbName);
-  } catch (err) {
-    clientPromise = null;
+let clientPromise = null;
 
-    console.error("MongoDB connection failed:", err.message);
-    throw err;
+export const connectToMongoDB = async () => {
+  if (!clientPromise) {
+    clientPromise = (async () => {
+      await client.connect();
+
+      const database = client.db(dbName);
+
+      // Verify that the connection is working.
+      await database.command({ ping: 1 });
+
+      console.log(`Connected to MongoDB database: ${dbName}`);
+
+      return database;
+    })().catch((error) => {
+      clientPromise = null;
+      console.error("MongoDB connection failed:", error.message);
+      throw error;
+    });
   }
+
+  return clientPromise;
 };
 
-const getCollection = async (collectionName) => {
+export const getCollection = async (collectionName) => {
+  const allowedCollections = ["users", "menuItems", "orders", "transactions"];
+
+  if (!allowedCollections.includes(collectionName)) {
+    throw new Error(`Invalid business collection: ${collectionName}`);
+  }
+
   const database = await connectToMongoDB();
+
   return database.collection(collectionName);
 };
 
-export { connectToMongoDB, getCollection };
+export const closeDB = async () => {
+  if (!databasePromise) return;
+
+  try {
+    await client.close();
+    console.log("MongoDB connection closed");
+  } finally {
+    databasePromise = null;
+  }
+};

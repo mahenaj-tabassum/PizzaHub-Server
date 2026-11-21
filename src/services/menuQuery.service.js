@@ -1,61 +1,153 @@
 /**
  * Responsibility:
- * - Build MongoDB queries for filtering menu items.
- * - Escape special regex characters to ensure safe text searches.
- * - Apply sorting based on the selected sort options.
- * - Handle pagination by calculating the current page, limit, and skip value.
+ * - Validate public menu query parameters.
+ * - Build safe MongoDB search and filter queries.
+ * - Apply supported sorting options.
+ * - Calculate pagination values.
  */
 
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 12;
+const MAX_LIMIT = 50;
+
+const ALLOWED_SORT_OPTIONS = ["price_asc", "price_desc"];
+
+class MenuQueryValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "MenuQueryValidationError";
+    this.statusCode = 400;
+  }
+}
+
+// Escape special regex characters supplied by users.
 const escapeRegex = (value) => {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
+// Validate optional text query parameters.
+const validateText = (value, fieldName, maxLength = 100) => {
+  if (value === undefined) return undefined;
+
+  if (typeof value !== "string") {
+    throw new MenuQueryValidationError(`${fieldName} must be a string`);
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    throw new MenuQueryValidationError(`${fieldName} cannot be empty`);
+  }
+
+  if (trimmedValue.length > maxLength) {
+    throw new MenuQueryValidationError(
+      `${fieldName} cannot exceed ${maxLength} characters`,
+    );
+  }
+
+  return trimmedValue;
+};
+
+// Validate positive integer query parameters.
+const parsePositiveInteger = (value, fieldName, defaultValue) => {
+  if (value === undefined) return defaultValue;
+
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) {
+    throw new MenuQueryValidationError(
+      `${fieldName} must be a positive integer`,
+    );
+  }
+
+  const parsedValue = Number(value);
+
+  if (!Number.isSafeInteger(parsedValue)) {
+    throw new MenuQueryValidationError(`${fieldName} is too large`);
+  }
+
+  return parsedValue;
+};
+
+// Build public menu search and filter query.
 const buildMenuQuery = ({ q, category, location }) => {
+  const search = validateText(q, "q");
+  const selectedCategory = validateText(category, "category");
+  const selectedLocation = validateText(location, "location");
+
   const query = {
     status: "approved",
     isAvailable: true,
   };
 
-  //   Search by item name
-  if (q) {
-    query.itemName = {
-      $regex: escapeRegex(q),
-      $options: "i", // no differentiation between uppercase and lowercase.
-    };
+  // Search item name and description.
+  if (search) {
+    const safeSearch = escapeRegex(search);
+
+    query.$or = [
+      {
+        itemName: {
+          $regex: safeSearch,
+          $options: "i",
+        },
+      },
+      {
+        description: {
+          $regex: safeSearch,
+          $options: "i",
+        },
+      },
+    ];
   }
 
-  //   Filter by category
-  if (category) {
+  if (selectedCategory) {
     query.category = {
-      $regex: escapeRegex(category),
+      $regex: escapeRegex(selectedCategory),
       $options: "i",
     };
   }
 
-  //   Filter by location
-  if (location) {
+  if (selectedLocation) {
     query.location = {
-      $regex: escapeRegex(location),
+      $regex: escapeRegex(selectedLocation),
       $options: "i",
     };
   }
+
   return query;
 };
 
+// Return supported MongoDB sort object.
 const getMenuSort = (sort) => {
+  if (sort === undefined) {
+    return { createdAt: -1 };
+  }
+
+  if (typeof sort !== "string" || !ALLOWED_SORT_OPTIONS.includes(sort)) {
+    throw new MenuQueryValidationError(
+      "Invalid sort option. Use price_asc or price_desc",
+    );
+  }
+
   switch (sort) {
     case "price_asc":
-      return { price: 1 }; // 1 = ascending
+      return { price: 1, _id: 1 };
+
     case "price_desc":
-      return { price: -1 };
+      return { price: -1, _id: -1 };
+
     default:
       return { createdAt: -1 };
   }
 };
 
+// Calculate pagination.
 const getPagination = (page, limit) => {
-  const currentPage = Math.max(1, Number(page) || 1);
-  const perPage = Math.min(50, Math.max(1, Number(limit)) || 12);
+  const currentPage = parsePositiveInteger(page, "page", DEFAULT_PAGE);
+
+  const perPage = parsePositiveInteger(limit, "limit", DEFAULT_LIMIT);
+
+  if (perPage > MAX_LIMIT) {
+    throw new MenuQueryValidationError(`limit cannot exceed ${MAX_LIMIT}`);
+  }
 
   return {
     page: currentPage,
@@ -64,4 +156,4 @@ const getPagination = (page, limit) => {
   };
 };
 
-export { buildMenuQuery, getMenuSort, getPagination };
+export { buildMenuQuery, getMenuSort, getPagination, MenuQueryValidationError };
