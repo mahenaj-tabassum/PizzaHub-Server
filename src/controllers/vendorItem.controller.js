@@ -198,7 +198,7 @@ export const GetMyMenuItem = async (req, res, next) => {
     const menuCollection = await getCollection("menuItems");
 
     const items = await menuCollection
-      .find({ vendorId })
+      .find({ vendorId, deletedAt: null })
       .sort({ createdAt: -1 })
       .toArray();
 
@@ -234,6 +234,7 @@ export const GetMySingleMenuItem = async (req, res, next) => {
     const item = await menuCollection.findOne({
       _id: new ObjectId(id),
       vendorId,
+      deletedAt: null,
     });
 
     if (!item) {
@@ -256,7 +257,8 @@ export const GetMySingleMenuItem = async (req, res, next) => {
 // -----------------------------------------------------------------------------
 // PATCH /api/vendor/items/:id
 // Content changes always reset status to pending.
-// Inactive/deleted items cannot be edited or restored through this endpoint.
+// An edit can turn a rejected/admin-deactivated item into a pending (active)
+// one, so the Free-plan limit must be enforced inside a transaction.
 // -----------------------------------------------------------------------------
 export const UpdateMenuItem = async (req, res, next) => {
   try {
@@ -269,36 +271,90 @@ export const UpdateMenuItem = async (req, res, next) => {
       });
     }
 
+    const client = await getMongoClient();
     const vendorId = getVendorId(req.user);
+
+    const usersCollection = await getCollection("users");
     const menuCollection = await getCollection("menuItems");
 
-    const updates = {
-      ...req.body,
-      status: MENU_ITEM_STATUS.PENDING,
-      updatedAt: new Date(),
-    };
+    let updatedItem;
 
-    const result = await menuCollection.updateOne(
-      {
-        _id: new ObjectId(id),
-        vendorId,
-        status: { $ne: MENU_ITEM_STATUS.INACTIVE },
-      },
-      {
-        $set: updates,
-      },
-    );
+    await runQuotaTransaction(client, async (session) => {
+      // Read the latest subscription data inside the transaction.
+      const vendor = await usersCollection.findOne(
+        { _id: getVendorDatabaseId(req.user) },
+        { session },
+      );
 
-    if (result.matchedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Menu item not found or already deleted",
-      });
-    }
+      if (!vendor || vendor.role !== "vendor") {
+        throw new VendorItemError("Vendor account not found", 404);
+      }
 
-    const updatedItem = await menuCollection.findOne({
-      _id: new ObjectId(id),
-      vendorId,
+      const item = await menuCollection.findOne(
+        {
+          _id: new ObjectId(id),
+          vendorId,
+          deletedAt: null,
+        },
+        { session },
+      );
+
+      if (!item) {
+        throw new VendorItemError(
+          "Menu item not found or already deleted",
+          404,
+        );
+      }
+
+      // Was this item counted against the Free limit before the edit?
+      const wasCounted =
+        ACTIVE_MENU_ITEM_STATUSES.includes(item.status) &&
+        item.isAvailable === true;
+
+      // After the edit the status is pending, so an available item counts.
+      const willBeCounted = item.isAvailable === true;
+
+      // Only a real "not counted" -> "counted" change needs a quota check.
+      if (willBeCounted && !wasCounted) {
+        await enforceVendorItemLimit({
+          vendor,
+          vendorId,
+          usersCollection,
+          menuCollection,
+          session,
+        });
+      }
+
+      const result = await menuCollection.updateOne(
+        {
+          _id: item._id,
+          vendorId,
+          deletedAt: null,
+          // The item must not change between our read and this write.
+          status: item.status,
+          isAvailable: item.isAvailable,
+        },
+        {
+          $set: {
+            ...req.body,
+            status: MENU_ITEM_STATUS.PENDING,
+            updatedAt: new Date(),
+          },
+        },
+        { session },
+      );
+
+      if (result.matchedCount !== 1) {
+        throw new VendorItemError(
+          "Menu item changed during this request. Please try again.",
+          409,
+        );
+      }
+
+      updatedItem = await menuCollection.findOne(
+        { _id: item._id, vendorId },
+        { session },
+      );
     });
 
     return res.status(200).json({
@@ -307,6 +363,10 @@ export const UpdateMenuItem = async (req, res, next) => {
       data: updatedItem,
     });
   } catch (error) {
+    if (error instanceof VendorItemError) {
+      return sendVendorItemError(res, error);
+    }
+
     return next(error);
   }
 };
@@ -334,7 +394,7 @@ export const DeleteMenuItem = async (req, res, next) => {
       {
         _id: new ObjectId(id),
         vendorId,
-        status: { $ne: MENU_ITEM_STATUS.INACTIVE },
+        deletedAt: null,
       },
       {
         $set: {
@@ -403,10 +463,9 @@ export const UpdateMenuItemAvailability = async (req, res, next) => {
         { session },
       );
 
-      if (!item || item.status === MENU_ITEM_STATUS.INACTIVE) {
+      if (!item || item.deletedAt) {
         throw new VendorItemError("Menu item not found", 404);
       }
-
       // Activating a pending/rejected item is not allowed.
       if (isAvailable && item.status !== MENU_ITEM_STATUS.APPROVED) {
         throw new VendorItemError(

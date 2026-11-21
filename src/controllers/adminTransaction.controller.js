@@ -1,4 +1,5 @@
 import { getCollection } from "../config/db.js";
+import { adminVendorInfoStages } from "../services/menuVendor.service.js";
 
 // GET: /api/admin/transactions
 const GetAllTransactions = async (req, res, next) => {
@@ -41,19 +42,20 @@ const GetAllTransactions = async (req, res, next) => {
 
     const [transactions, totalTransactions] = await Promise.all([
       transactionCollection
-        .find(query, {
-          projection: {
-            password: 0,
-            token: 0,
-            secret: 0,
-            client_secret: 0,
-            webhookSecret: 0,
-            authorization: 0,
+        .aggregate([
+          { $match: query },
+          { $sort: { createdAt: -1, _id: -1 } },
+          { $skip: skip },
+          { $limit: safeLimit },
+          ...adminVendorInfoStages(),
+          // Internal webhook bookkeeping is not needed by the admin UI.
+          {
+            $project: {
+              processedStripeEventIds: 0,
+              lastStripeEventId: 0,
+            },
           },
-        })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(safeLimit)
+        ])
         .toArray(),
 
       transactionCollection.countDocuments(query),

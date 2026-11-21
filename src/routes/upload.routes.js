@@ -10,11 +10,13 @@ import { UploadImage } from "../controllers/upload.controller.js";
 
 const router = Router();
 
+// Any signed-in, unblocked user may upload an image:
+// vendors for menu items, everyone for their profile picture.
 router.post(
   "/",
   verifyToken,
   checkBlocked,
-  requireRole(ROLES.VENDOR),
+  requireRole(ROLES.ADMIN, ROLES.VENDOR, ROLES.CUSTOMER),
   upload.single("image"),
   UploadImage,
 );

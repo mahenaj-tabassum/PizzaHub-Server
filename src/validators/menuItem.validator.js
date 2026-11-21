@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CATEGORIES } from "../utils/constants.js";
 
 const menuItemFields = {
   itemName: z
@@ -7,12 +8,9 @@ const menuItemFields = {
     .min(2, "Item name must contain at least 2 characters")
     .max(100, "Item name cannot exceed 100 characters"),
 
-  category: z
-    .string()
-    .trim()
-    .min(2, "Category is required")
-    .max(50, "Category cannot exceed 50 characters"),
-
+  category: z.enum(CATEGORIES, {
+    error: "Please select a valid category",
+  }),
   description: z
     .string()
     .trim()

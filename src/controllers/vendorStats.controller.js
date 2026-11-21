@@ -56,6 +56,7 @@ const GetVendorStats = async (req, res, next) => {
       // All menu items created by this vendor.
       menuCollection.countDocuments({
         vendorId,
+        deletedAt: null,
       }),
 
       // Publicly active menu items.

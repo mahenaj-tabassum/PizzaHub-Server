@@ -4,21 +4,9 @@ export const ROLES = Object.freeze({
   CUSTOMER: "customer",
 });
 
-export const USER_STATUS = Object.freeze({
-  BLOCKED: true,
-  ACTIVE: false,
-});
-
 export const SUBSCRIPTION_PLANS = Object.freeze({
   FREE: "free",
   PREMIUM: "premium",
-});
-
-export const MENU_STATUS = Object.freeze({
-  PENDING: "pending",
-  APPROVED: "approved",
-  REJECTED: "rejected",
-  INACTIVE: "inactive",
 });
 
 export const ORDER_STATUS = Object.freeze({
@@ -50,6 +38,14 @@ export const MENU_ITEM_STATUS = Object.freeze({
 export const ACTIVE_MENU_ITEM_STATUSES = Object.freeze([
   MENU_ITEM_STATUS.PENDING,
   MENU_ITEM_STATUS.APPROVED,
+]);
+export const CATEGORIES = Object.freeze([
+  "Classic Pizzas",
+  "Vegetarian Pizzas",
+  "Meat Lovers",
+  "Gourmet Pizzas",
+  "Sides & Appetizers",
+  "Beverages & Desserts",
 ]);
 
 export const FREE_VENDOR_ACTIVE_ITEM_LIMIT = 3;

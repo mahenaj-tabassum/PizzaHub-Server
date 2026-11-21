@@ -13,14 +13,29 @@ const app = express();
 // 1. Security Headers
 app.use(helmet());
 
-// 2. CORS configuration
-/* app.use(
-	  cors({
-	    origin: process.env.CLIENT_URL,
-	    credentials: true,
-	  }),
- ) */
-app.use(cors());
+// 2. CORS: only the real client (plus localhost while developing).
+const clientUrl = process.env.CLIENT_URL?.trim().replace(/\/+$/, "");
+
+const allowedOrigins = [
+  clientUrl,
+  ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost:3000"]),
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // No Origin header: Stripe webhooks, Postman, server-to-server calls.
+      if (!origin) return callback(null, true);
+
+      // Disallowed origins simply get no CORS headers (browser blocks them).
+      return callback(null, allowedOrigins.includes(origin));
+    },
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    maxAge: 86400,
+  }),
+);
+
 // 3. Stripe webhook (must come before express.json)
 app.use(
   "/api/webhooks/stripe",
@@ -28,9 +43,10 @@ app.use(
   webhookRoutes,
 );
 
-app.get("/", (req, res)=>{
-	res.send("Server is running successfully")
-})
+app.get("/", (req, res) => {
+  res.send("Server is running successfully");
+});
+
 // 4. Parse incoming JSON requests
 app.use(express.json());
 

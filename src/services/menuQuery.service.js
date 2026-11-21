@@ -99,10 +99,7 @@ const buildMenuQuery = ({ q, category, location }) => {
   }
 
   if (selectedCategory) {
-    query.category = {
-      $regex: escapeRegex(selectedCategory),
-      $options: "i",
-    };
+    query.category = selectedCategory;
   }
 
   if (selectedLocation) {
@@ -118,7 +115,7 @@ const buildMenuQuery = ({ q, category, location }) => {
 // Return supported MongoDB sort object.
 const getMenuSort = (sort) => {
   if (sort === undefined) {
-    return { createdAt: -1 };
+    return { createdAt: -1, _id: -1 };
   }
 
   if (typeof sort !== "string" || !ALLOWED_SORT_OPTIONS.includes(sort)) {

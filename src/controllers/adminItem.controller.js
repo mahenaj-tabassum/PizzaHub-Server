@@ -1,5 +1,6 @@
 import { ObjectId } from "mongodb";
 import { getCollection } from "../config/db.js";
+import { adminVendorInfoStages } from "../services/menuVendor.service.js";
 
 const isValidId = (id) => /^[0-9a-fA-F]{24}$/.test(id);
 
@@ -18,7 +19,7 @@ export const GetAllMenuItems = async (req, res, next) => {
     const perPage = Number(limit);
     const safeLimit = Math.min(perPage, 50);
     const skip = (currentPage - 1) * safeLimit;
-    const filters = [];
+    const filters = [{ deletedAt: null }];
     const menuCollection = await getCollection("menuItems");
 
     if (typeof q !== "string") {
@@ -72,10 +73,14 @@ export const GetAllMenuItems = async (req, res, next) => {
 
     const [items, totalItems] = await Promise.all([
       menuCollection
-        .find(query)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(safeLimit)
+        .aggregate([
+          { $match: query },
+          { $sort: { createdAt: -1, _id: -1 } },
+          { $skip: skip },
+          { $limit: safeLimit },
+          // Lookup only for the items on this page.
+          ...adminVendorInfoStages(),
+        ])
         .toArray(),
       menuCollection.countDocuments(query),
     ]);
@@ -123,6 +128,7 @@ export const ApproveMenuItem = async (req, res, next) => {
     if (result.matchedCount === 0) {
       const item = await findItemById(id);
       return res.status(item ? 409 : 404).json({
+        success: false,
         message: item
           ? "Only pending items can be approved"
           : "Menu item not found",
@@ -210,7 +216,12 @@ export const UpdateMenuItemStatus = async (req, res, next) => {
     }
 
     const result = await menuCollection.updateOne(
-      { _id: new ObjectId(id) },
+      {
+        _id: new ObjectId(id),
+        deletedAt: null,
+        // Pending and rejected items must go through approve/reject.
+        status: { $in: ["approved", "inactive"] },
+      },
       {
         $set: {
           status,
@@ -220,9 +231,14 @@ export const UpdateMenuItemStatus = async (req, res, next) => {
     );
 
     if (result.matchedCount === 0) {
-      return res.status(404).json({
+      const item = await findItemById(id);
+      const exists = item && !item.deletedAt;
+
+      return res.status(exists ? 409 : 404).json({
         success: false,
-        message: "Menu item not found",
+        message: exists
+          ? "Only approved or inactive items can be changed here"
+          : "Menu item not found",
       });
     }
 

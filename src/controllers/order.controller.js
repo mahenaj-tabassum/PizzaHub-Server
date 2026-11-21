@@ -89,7 +89,7 @@ export const CreateOrder = async (req, res, next) => {
     // 5. Save item/vendor snapshots so order history remains meaningful
     // even if the menu item or vendor profile changes later.
     const newOrder = {
-      normalizedItemId,
+      itemId: normalizedItemId,
 
       vendorId,
       customerId,

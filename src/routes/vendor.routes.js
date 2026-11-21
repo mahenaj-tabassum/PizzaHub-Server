@@ -5,7 +5,6 @@ import checkBlocked from "../middleware/checkBlocked.js";
 import requireRole from "../middleware/requireRole.js";
 import validate from "../middleware/validate.js";
 import GetVendorStats from "../controllers/vendorStats.controller.js";
-import CreatePremiumCheckoutSession from "../controllers/subscription.controller.js";
 
 import { ROLES } from "../utils/constants.js";
 
@@ -66,6 +65,5 @@ router.patch(
 // Vendor dashboard statistics
 router.get("/stats", GetVendorStats);
 
-router.post('/subscription/checkout', CreatePremiumCheckoutSession)
 
 export default router;

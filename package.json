@@ -9,9 +9,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "db:indexes": "node src/scripts/createIndexes.js",
-    "db:seed:admin": "node src/scripts/seedAdmin.js",
-    "db:seed:menu": "node src/scripts/seedMenu.js"
+    "db:indexes": "node src/scripts/createIndexes.js"
   },
   "keywords": [],
   "author": "",
@@ -24,7 +22,6 @@
     "helmet": "^8.3.0",
     "jose": "^6.2.18",
     "mongodb": "^7.9.1",
-    "morgan": "^1.12.1",
     "multer": "^2.5.0",
     "stripe": "^23.2.0",
     "zod": "^4.6.7"

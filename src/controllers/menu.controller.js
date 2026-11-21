@@ -1,6 +1,6 @@
 /**
  * Responsibility:
- * - Return public approved and available menu items.
+ * - Return public approved and available menu items with vendor info.
  * - Support search, category/location filters, sorting and pagination.
  * - Return featured menu items with active Premium vendors prioritized.
  * - Return public details of a single menu item.
@@ -16,18 +16,17 @@ import {
   MenuQueryValidationError,
 } from "../services/menuQuery.service.js";
 
+import {
+  vendorLookupStages,
+  vendorShapeStages,
+} from "../services/menuVendor.service.js";
+
 // GET: /api/menu
 const GetAllMenuItems = async (req, res, next) => {
   try {
     const { q, category, location, sort, page, limit } = req.query;
 
-    // Build and validate query.
-    const query = buildMenuQuery({
-      q,
-      category,
-      location,
-    });
-
+    const query = buildMenuQuery({ q, category, location });
     const sortOption = getMenuSort(sort);
     const pagination = getPagination(page, limit);
 
@@ -35,10 +34,15 @@ const GetAllMenuItems = async (req, res, next) => {
 
     const [items, totalItems] = await Promise.all([
       menuCollection
-        .find(query)
-        .sort(sortOption)
-        .skip(pagination.skip)
-        .limit(pagination.limit)
+        .aggregate([
+          { $match: query },
+          { $sort: sortOption },
+          { $skip: pagination.skip },
+          { $limit: pagination.limit },
+          // Lookup only for the items on this page.
+          ...vendorLookupStages(),
+          ...vendorShapeStages,
+        ])
         .toArray(),
 
       menuCollection.countDocuments(query),
@@ -76,95 +80,17 @@ const GetFeaturedMenuItems = async (req, res, next) => {
   try {
     const menuCollection = await getCollection("menuItems");
 
-    const now = new Date();
-
     const items = await menuCollection
       .aggregate([
-        {
-          $match: {
-            status: "approved",
-            isAvailable: true,
-            isFeatured: true,
-          },
-        },
+        { $match: { status: "approved", isAvailable: true } },
 
-        // Find the vendor's subscription information.
-        {
-          $lookup: {
-            from: "users",
-            let: {
-              itemVendorId: "$vendorId",
-            },
-            pipeline: [
-              {
-                $match: {
-                  $expr: {
-                    $or: [
-                      {
-                        $eq: ["$id", "$$itemVendorId"],
-                      },
-                      {
-                        $eq: [{ $toString: "$_id" }, "$$itemVendorId"],
-                      },
-                    ],
-                  },
-                },
-              },
-              {
-                $project: {
-                  subscriptionPlan: 1,
-                  subscriptionExpiresAt: 1,
-                },
-              },
-            ],
-            as: "vendorInfo",
-          },
-        },
+        // Lookup first, because Premium vendors must be sorted first.
+        ...vendorLookupStages(),
 
-        {
-          $addFields: {
-            vendorInfo: {
-              $arrayElemAt: ["$vendorInfo", 0],
-            },
-          },
-        },
+        { $sort: { isPremiumVendor: -1, createdAt: -1, _id: -1 } },
+        { $limit: 6 },
 
-        // A Premium subscription must not be expired.
-        {
-          $addFields: {
-            isPremiumVendor: {
-              $and: [
-                {
-                  $eq: ["$vendorInfo.subscriptionPlan", "premium"],
-                },
-                {
-                  $gt: ["$vendorInfo.subscriptionExpiresAt", now],
-                },
-              ],
-            },
-          },
-        },
-
-        // Premium vendor items appear first.
-        {
-          $sort: {
-            isPremiumVendor: -1,
-            createdAt: -1,
-            _id: -1,
-          },
-        },
-
-        {
-          $limit: 6,
-        },
-
-        // Do not expose internal lookup fields.
-        {
-          $project: {
-            vendorInfo: 0,
-            isPremiumVendor: 0,
-          },
-        },
+        ...vendorShapeStages,
       ])
       .toArray();
 
@@ -183,7 +109,6 @@ const GetSingleMenuItem = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    // Validate MongoDB ObjectId.
     if (!/^[0-9a-fA-F]{24}$/.test(id)) {
       return res.status(400).json({
         success: false,
@@ -193,11 +118,19 @@ const GetSingleMenuItem = async (req, res, next) => {
 
     const menuCollection = await getCollection("menuItems");
 
-    const item = await menuCollection.findOne({
-      _id: new ObjectId(id),
-      status: "approved",
-      isAvailable: true,
-    });
+    const [item] = await menuCollection
+      .aggregate([
+        {
+          $match: {
+            _id: new ObjectId(id),
+            status: "approved",
+            isAvailable: true,
+          },
+        },
+        ...vendorLookupStages(),
+        ...vendorShapeStages,
+      ])
+      .toArray();
 
     if (!item) {
       return res.status(404).json({
