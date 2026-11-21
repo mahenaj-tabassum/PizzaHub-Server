@@ -1,4 +1,5 @@
 import { Router } from "express";
+
 import menuRoutes from "./menu.routes.js";
 import vendorRoutes from "./vendor.routes.js";
 import orderRoutes from "./order.routes.js";
@@ -11,6 +12,6 @@ router.use("/menu", menuRoutes);
 router.use("/vendor", vendorRoutes);
 router.use("/orders", orderRoutes);
 router.use("/customer", customerRoutes);
-router.use("/admin", adminRoutes)
+router.use("/admin", adminRoutes);
 
 export default router;

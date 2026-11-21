@@ -1,9 +1,9 @@
 /**
  * Responsibility:
- * - Handle HTTP requests related to retrieving menu items.
- * - Fetch all approved and available menu items with search, filtering, sorting, and pagination.
- * - Retrieve featured menu items for the featured section.
- * - Retrieve a single menu item by its MongoDB ObjectId.
+ * - Return public approved and available menu items.
+ * - Support search, category/location filters, sorting and pagination.
+ * - Return featured menu items with active Premium vendors prioritized.
+ * - Return public details of a single menu item.
  */
 
 import { ObjectId } from "mongodb";
@@ -13,15 +13,20 @@ import {
   buildMenuQuery,
   getMenuSort,
   getPagination,
+  MenuQueryValidationError,
 } from "../services/menuQuery.service.js";
-import { isValidObjectId } from "../utils/objectId.js";
 
 // GET: /api/menu
 const GetAllMenuItems = async (req, res, next) => {
   try {
     const { q, category, location, sort, page, limit } = req.query;
 
-    const query = buildMenuQuery({ q, category, location });
+    // Build and validate query.
+    const query = buildMenuQuery({
+      q,
+      category,
+      location,
+    });
 
     const sortOption = getMenuSort(sort);
     const pagination = getPagination(page, limit);
@@ -39,7 +44,9 @@ const GetAllMenuItems = async (req, res, next) => {
       menuCollection.countDocuments(query),
     ]);
 
-    res.status(200).json({
+    const totalPages = Math.ceil(totalItems / pagination.limit);
+
+    return res.status(200).json({
       success: true,
       message: "Menu items retrieved successfully",
       data: items,
@@ -47,29 +54,121 @@ const GetAllMenuItems = async (req, res, next) => {
         currentPage: pagination.page,
         limit: pagination.limit,
         totalItems,
-        totalPages: Math.ceil(totalItems / pagination.limit),
+        totalPages,
+        hasNextPage: pagination.page < totalPages,
+        hasPrevPage: pagination.page > 1,
       },
     });
   } catch (error) {
+    if (error instanceof MenuQueryValidationError) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
     next(error);
   }
 };
 
 // GET: /api/menu/featured
-
 const GetFeaturedMenuItems = async (req, res, next) => {
   try {
     const menuCollection = await getCollection("menuItems");
+
+    const now = new Date();
+
     const items = await menuCollection
-      .find({
-        status: "approved",
-        isAvailable: true,
-        isFeatured: true,
-      })
-      .sort({ createdAt: -1 })
-      .limit(6)
+      .aggregate([
+        {
+          $match: {
+            status: "approved",
+            isAvailable: true,
+            isFeatured: true,
+          },
+        },
+
+        // Find the vendor's subscription information.
+        {
+          $lookup: {
+            from: "users",
+            let: {
+              itemVendorId: "$vendorId",
+            },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $or: [
+                      {
+                        $eq: ["$id", "$$itemVendorId"],
+                      },
+                      {
+                        $eq: [{ $toString: "$_id" }, "$$itemVendorId"],
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                $project: {
+                  subscriptionPlan: 1,
+                  subscriptionExpiresAt: 1,
+                },
+              },
+            ],
+            as: "vendorInfo",
+          },
+        },
+
+        {
+          $addFields: {
+            vendorInfo: {
+              $arrayElemAt: ["$vendorInfo", 0],
+            },
+          },
+        },
+
+        // A Premium subscription must not be expired.
+        {
+          $addFields: {
+            isPremiumVendor: {
+              $and: [
+                {
+                  $eq: ["$vendorInfo.subscriptionPlan", "premium"],
+                },
+                {
+                  $gt: ["$vendorInfo.subscriptionExpiresAt", now],
+                },
+              ],
+            },
+          },
+        },
+
+        // Premium vendor items appear first.
+        {
+          $sort: {
+            isPremiumVendor: -1,
+            createdAt: -1,
+            _id: -1,
+          },
+        },
+
+        {
+          $limit: 6,
+        },
+
+        // Do not expose internal lookup fields.
+        {
+          $project: {
+            vendorInfo: 0,
+            isPremiumVendor: 0,
+          },
+        },
+      ])
       .toArray();
-    res.status(200).json({
+
+    return res.status(200).json({
       success: true,
       message: "Featured menu items retrieved successfully",
       data: items,
@@ -84,26 +183,30 @@ const GetSingleMenuItem = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    // Validate MongoDB ObjectId
-    if (!isValidObjectId(id)) {
+    // Validate MongoDB ObjectId.
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid ID",
+        message: "Invalid menu item ID",
       });
     }
+
     const menuCollection = await getCollection("menuItems");
+
     const item = await menuCollection.findOne({
       _id: new ObjectId(id),
       status: "approved",
       isAvailable: true,
     });
+
     if (!item) {
       return res.status(404).json({
         success: false,
         message: "Menu item not found",
       });
     }
-    res.status(200).json({
+
+    return res.status(200).json({
       success: true,
       message: "Menu item retrieved successfully",
       data: item,

@@ -12,4 +12,4 @@ router.get("/", GetAllMenuItems);
 router.get("/featured", GetFeaturedMenuItems);
 router.get("/:id", GetSingleMenuItem);
 
-export default router
+export default router;
