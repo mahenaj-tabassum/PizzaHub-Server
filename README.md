@@ -1,183 +1,162 @@
-# PizzaHub Server
+# PizzaHub Server — REST API
 
-REST API for **PizzaHub**, a role-based pizza ordering and delivery platform. Customers browse menus and place orders, vendors (restaurants) publish menu items and manage orders, and admins moderate users, items and transactions. Vendors can upgrade to a Premium subscription through Stripe Checkout.
+Express + MongoDB API for the PizzaHub pizza ordering platform. It handles menu items, orders, role-based dashboards, ImgBB uploads and Stripe subscriptions with webhook-verified Premium activation.
 
-- **Live API:** <https://your-server.vercel.app>
-- **Live Website:** <https://your-client.vercel.app>
-- **Server Repository:** <https://github.com/your-username/pizzahub-server>
-- **Client Repository:** <https://github.com/your-username/pizzahub-client>
+## Live Links
 
-## Important Features
+- **Live API:** https://pizzahub-api-server.vercel.app
+- **Live site:** https://pizzahub-client-web.vercel.app
+- **Server repository:** https://github.com/mahenaj-tabassum/PizzaHub-Server
+- **Client repository:** https://github.com/mahenaj-tabassum/PizzaHub-Client
 
-- JWT verification (Better Auth JWKS) with role-based middleware: Admin, Vendor, Customer
-- Blocked users are rejected on every protected route
-- Menu items go through admin approval: `pending` → `approved` / `rejected`
-- Public menu with search, category and location filters, price sorting and pagination
-- Free plan: max 3 active items. Premium: unlimited (enforced inside a MongoDB transaction)
-- Orders with duplicate-active-order protection (unique partial index)
-- Vendors can accept or reject only pending orders, and only once
-- Customers can cancel only their own pending orders
-- Stripe Checkout (subscription mode) with signed webhooks. Premium is activated **only** after a verified webhook event
-- Subscription cancellation and expiry handled through webhooks and the Stripe Billing Portal
-- Image upload to ImgBB through the server, so the API key stays private
-- Validation with Zod, centralized error handling, Helmet security headers
-- Seed scripts for the admin user and sample menu items
+## Key Features
+
+- JWT verification (Better Auth JWKS) with role-based middleware for Admin, Vendor and Customer
+- Blocked users rejected on every protected route
+- Public menu API with search, category and location filters, price sorting and pagination
+- Order system with duplicate-order protection (partial unique index)
+- Free plan limit of 3 active items, enforced inside a MongoDB transaction
+- Stripe Checkout (subscription mode), Billing Portal and signed webhooks
+- Premium is activated **only** after a verified webhook event
+- ImgBB upload proxy so the API key stays on the server
+- Zod validation, Helmet, CORS allow-list, global error handler
 
 ## Technology Stack
 
-| Package         | Purpose                                       |
-| --------------- | --------------------------------------------- |
-| `express` (v5)  | Web framework                                 |
-| `mongodb`       | Database driver                               |
-| `jose`          | JWT verification against the Better Auth JWKS |
-| `stripe`        | Checkout, Billing Portal, webhooks            |
-| `multer`        | Image upload (memory storage)                 |
-| `zod`           | Request validation                            |
-| `cors`          | CORS configuration                            |
-| `helmet`        | Security headers                              ||
-| `dotenv`        | Environment variables                         |
-| `nodemon` (dev) | Auto-restart in development                   |
+| Package          | Use                                |
+| ---------------- | ---------------------------------- |
+| `express`        | HTTP server                        |
+| `mongodb`        | Database driver                    |
+| `jose`           | JWT verification via remote JWKS   |
+| `stripe`         | Checkout, Billing Portal, webhooks |
+| `zod`            | Request validation                 |
+| `multer`         | Image upload (memory storage)      |
+| `cors`, `helmet` | Security                           |
+| `dotenv`         | Environment variables              |
+| `nodemon`        | Dev auto-restart                   |
+
+## Installation
+
+```bash
+git https://github.com/mahenaj-tabassum/PizzaHub-Server.git
+cd PizzaHub-Server
+npm install
+cp .env.example .env
+# fill in the values
+```
+
+## Run Locally
+
+```bash
+npm run dev          # nodemon, http://localhost:5000
+npm start            # plain node
+npm run db:indexes   # create indexes (run once per database)
+```
+
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in the values. **Never commit `.env`.**
+Create `.env` (never commit it):
 
-| Name                      | Description                                                                                |
-| ------------------------- | ------------------------------------------------------------------------------------------ |
-| `PORT`                    | Local server port                                                                          |
-| `NODE_ENV`                | `development` or `production`                                                              |
-| `MONGODB_URI`             | MongoDB connection string                                                                  |
-| `DB_NAME`                 | Database name (must be the same database Better Auth uses)                                 |
-| `CLIENT_URL`              | Frontend URL, no trailing slash. Used for CORS and Stripe redirect URLs                    |
-| `BETTER_AUTH_URL`         | URL where Better Auth runs (the Next.js app). Used to verify JWT issuer, audience and JWKS |
-| `STRIPE_SECRET_KEY`       | Stripe secret key                                                                          |
-| `STRIPE_WEBHOOK_SECRET`   | Stripe webhook signing secret (`whsec_...`)                                                |
-| `STRIPE_PREMIUM_PRICE_ID` | Stripe recurring Price ID for the Premium plan                                             |
-| `IMGBB_API_KEY`           | ImgBB API key                                                                              |
-| `SEED_ADMIN_EMAIL`        | Email of an already registered user to promote to admin                                    |
-| `SEED_VENDOR_EMAIL`       | Email of an already registered vendor who will own the sample items                        |
+```
+PORT=
 
-## Installation and Running Locally
+MONGODB_URI=
+DB_NAME=
 
-```bash
-git clone <server-repo-url>
-cd pizzahub-server
-npm install
-cp .env.example .env     # then fill in the values
-npm run dev              # http://localhost:5000
+CLIENT_URL=
+BETTER_AUTH_URL=
+
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PREMIUM_PRICE_ID=
+
+IMGBB_API_KEY=
 ```
 
-Database setup (run once):
+| Variable                  | Purpose                                                                 |
+| ------------------------- | ----------------------------------------------------------------------- |
+| `CLIENT_URL`              | Client origin allowed by CORS and used for Stripe redirect URLs         |
+| `BETTER_AUTH_URL`         | Client URL that runs Better Auth (JWT issuer, audience and JWKS source) |
+| `STRIPE_PREMIUM_PRICE_ID` | A **recurring** monthly Price in Stripe                                 |
+| `STRIPE_WEBHOOK_SECRET`   | Signing secret of the webhook endpoint                                  |
 
-```bash
-npm run db:indexes       # create unique and compound indexes
+## Stripe Webhook Setup
+
+Endpoint URL: `https://https://pizzahub-api-server.vercel.app/api/webhooks/stripe`
+
+Subscribe to these events:
+
+- `checkout.session.completed`
+- `checkout.session.async_payment_succeeded`
+- `checkout.session.async_payment_failed`
+- `checkout.session.expired`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+- `invoice.payment_succeeded`
+- `invoice.payment_failed`
+
+Also enable the **Customer Portal** in Stripe settings so "Manage subscription" works.
+
+## Middleware Flow
+
+Every protected route runs:
+
+```
+verifyToken  →  checkBlocked  →  requireRole(...)  →  validate(zodSchema)  →  controller
 ```
 
-1. Register the admin and a vendor account from the client app (Better Auth creates them).
-2. Put their emails in `SEED_ADMIN_EMAIL` and `SEED_VENDOR_EMAIL`.
-3. Run:
+| Step                                                             | Failure |
+| ---------------------------------------------------------------- | ------- |
+| `verifyToken` (signature, issuer, audience, expiry, user exists) | 401     |
+| `checkBlocked`                                                   | 403     |
+| `requireRole`                                                    | 403     |
+| `validate`                                                       | 400     |
 
-```bash
-npm run db:seed:admin    # promotes the account to admin
-npm run db:seed:menu     # inserts sample approved menu items
-```
-
-Stripe webhook (local testing):
-
-```bash
-stripe listen --forward-to localhost:5000/api/webhooks/stripe
-```
-
-Copy the printed `whsec_...` value into `STRIPE_WEBHOOK_SECRET`.
-
-## Scripts
-
-| Script                  | Description              |
-| ----------------------- | ------------------------ |
-| `npm start`             | Start the server         |
-| `npm run dev`           | Start with nodemon       |
-| `npm run db:indexes`    | Create database indexes  |
-| `npm run db:seed:admin` | Assign the admin role    |
-| `npm run db:seed:menu`  | Insert sample menu items |
+Ownership is verified in every controller. `vendorId` and `customerId` always come from the token's user, never from the request body.
 
 ## API Overview
 
-Protected routes need the header `Authorization: Bearer <JWT>`.
+**Public**
 
-| Area          | Endpoints                                                                                                         | Access                      |
-| ------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------- |
-| Menu          | `GET /api/menu`, `GET /api/menu/featured`, `GET /api/menu/:id`                                                    | Public                      |
-| Profile       | `GET /api/users/me`, `PATCH /api/users/me`                                                                        | Any signed-in user          |
-| Upload        | `POST /api/upload` (field name: `image`)                                                                          | Any signed-in user          |
-| Orders        | `POST /api/orders`, `GET /api/orders/my-orders`, `GET /api/orders/:id`, `PATCH /api/orders/:id/cancel`            | Customer                    |
-| Customer      | `GET /api/customer/stats`                                                                                         | Customer                    |
-| Vendor items  | `POST/GET /api/vendor/items`, `GET/PATCH/DELETE /api/vendor/items/:id`, `PATCH /api/vendor/items/:id/status`      | Vendor                      |
-| Vendor orders | `GET /api/vendor/orders`, `PATCH /api/vendor/orders/:id/status`                                                   | Vendor                      |
-| Vendor stats  | `GET /api/vendor/stats`                                                                                           | Vendor                      |
-| Payment       | `POST /api/payment/checkout`, `GET /api/payment/status`, `POST /api/payment/portal`                               | Vendor                      |
-| Admin users   | `GET /api/admin/users`, `PATCH /api/admin/users/:id/block`, `PATCH /api/admin/users/:id/unblock`                  | Admin                       |
-| Admin items   | `GET /api/admin/items`, `PATCH /api/admin/items/:id/approve`, `/reject`, `/status`, `DELETE /api/admin/items/:id` | Admin                       |
-| Admin data    | `GET /api/admin/stats`, `GET /api/admin/transactions`                                                             | Admin                       |
-| Webhook       | `POST /api/webhooks/stripe`                                                                                       | Stripe (signature verified) |
+| Method | Endpoint              | Description                             |
+| ------ | --------------------- | --------------------------------------- |
+| GET    | `/api/menu`           | List approved and available items       |
+| GET    | `/api/menu/featured`  | 6 featured items, Premium vendors first |
+| GET    | `/api/menu/locations` | Distinct locations for the filter       |
+| GET    | `/api/menu/:id`       | Single item                             |
 
-## Challenge Implementation Notes
+**Menu query parameters** (`GET /api/menu`)
 
-### 1. Advanced search and sorting
+| Param           | Rule                                                                     |
+| --------------- | ------------------------------------------------------------------------ |
+| `q`             | Regex-escaped, case-insensitive match on `itemName` or `description`     |
+| `category`      | Exact match                                                              |
+| `location`      | Case-insensitive match                                                   |
+| `sort`          | `price_asc` or `price_desc` (default: newest). Anything else returns 400 |
+| `page`, `limit` | Positive integers, default 1 and 12, max limit 50                        |
 
-`GET /api/menu` accepts these query parameters:
+**Customer**: `POST /api/orders`, `GET /api/orders/my-orders`, `GET /api/orders/:id`, `PATCH /api/orders/:id/cancel`, `GET /api/customer/stats`
 
-| Parameter  | Description                                          |
-| ---------- | ---------------------------------------------------- |
-| `q`        | Case-insensitive search in item name and description |
-| `category` | Exact match with one of the six fixed categories     |
-| `location` | Case-insensitive partial match on location           |
-| `sort`     | `price_asc` or `price_desc` (default: newest first)  |
-| `page`     | Page number, default `1`                             |
-| `limit`    | Items per page, default `12`, max `50`               |
+**Vendor**: `POST|GET /api/vendor/items`, `GET|PATCH|DELETE /api/vendor/items/:id`, `PATCH /api/vendor/items/:id/status`, `GET /api/vendor/orders`, `PATCH /api/vendor/orders/:id/status`, `GET /api/vendor/stats`
 
-Example: `/api/menu?q=chicken&category=Meat%20Lovers&location=Chattogram&sort=price_asc&page=1&limit=12`
+**Payment (vendor)**: `POST /api/payment/checkout`, `GET /api/payment/status`, `POST /api/payment/portal`
 
-How it works (`src/services/menuQuery.service.js`):
+**Admin**: `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH /api/admin/users/:id/block|unblock`, `GET /api/admin/items`, `PATCH /api/admin/items/:id/approve|reject|status`, `DELETE /api/admin/items/:id`, `GET /api/admin/transactions`
 
-1. Every parameter is validated. Invalid input returns `400`.
-2. User text is regex-escaped before use, which prevents regex injection.
-3. The base filter is always `status: "approved"` and `isAvailable: true`, so pending, rejected or inactive items can never leak to the public.
-4. `_id` is added to the sort as a tie-breaker so pagination is stable.
-5. A `$lookup` attaches public vendor info and the Premium flag to the items of the requested page only.
+**Other**: `POST /api/upload`, `GET|PATCH /api/users/me`, `POST /api/webhooks/stripe`
 
-### 2. JWT verification middleware
+## Business Rules Enforced on the Server
 
-Middleware flow for protected routes:
+- Only `approved` and `isAvailable` items are public and orderable
+- Vendors cannot order their own items; only customers can place orders
+- Only `pending` orders can be accepted, rejected or cancelled, and only once
+- One active order per customer, item and delivery date (unique partial index)
+- Free vendors may have at most 3 active items (pending and approved count)
+- Editing an item resets it to `pending` for re-approval
+- Admins cannot block admins or themselves, and there is no endpoint to edit transactions
+- Profile updates accept only `name`, `image` and `businessName`. Role and plan cannot be changed
 
-```
-Request
-  → verifyToken     (401 if missing, invalid or expired token)
-  → checkBlocked    (403 if the account is blocked)
-  → requireRole     (403 if the role is not allowed)
-  → validate        (400 if the body fails Zod validation)
-  → controller      (ownership is checked inside the query)
-```
+## Deployment (Vercel)
 
-`verifyToken` details (`src/middleware/verifyToken.js`):
-
-1. Reads `Authorization: Bearer <token>`.
-2. Verifies signature, issuer, audience and expiry with `jose` and the remote JWKS at `<BETTER_AUTH_URL>/api/auth/jwks`.
-3. Loads the current user from MongoDB using the token `sub`.
-4. Attaches that database user to `req.user`.
-
-The role and blocked status always come from the database, never from the token or the client. Resource ownership is enforced inside the query itself (for example `{ _id, vendorId }`), so one user can never touch another user's data.
-
-### 3. Payment flow
-
-1. Vendor calls `POST /api/payment/checkout`. The vendor ID comes from the verified token, so nobody can create a session for another vendor.
-2. The server creates a Stripe Checkout Session and saves a `pending` transaction.
-3. The vendor pays on Stripe and is redirected to the Payment Success page. **This redirect never activates Premium.**
-4. Stripe sends a signed webhook. The server verifies the signature, reads the real subscription from Stripe, and only then sets `subscriptionPlan: "premium"` and `subscriptionExpiresAt`.
-5. Duplicate events are skipped, and cancelled or expired subscriptions are downgraded to Free through the same webhook handler.
-
-## Testing the Application
-
-- **Admin Email:** `<admin email>`
-- **Admin Password:** `<admin password>`
-- **Stripe test card:** `4242 4242 4242 4242`, any future expiry date, any CVC, any ZIP.
-- To test as a vendor, sign up with the Vendor role, add items, then upgrade from the Subscription page.
+`api/index.js` exports the Express app and `vercel.json` rewrites all paths to it. Set all environment variables in the Vercel dashboard, then run `npm run db:indexes` once against the production database.
