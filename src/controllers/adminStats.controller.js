@@ -65,11 +65,21 @@ const GetAdminStats = async (req, res, next) => {
       // Revenue per month from completed payments only.
       transactionCollection
         .aggregate([
-          { $match: { status: "completed", createdAt: { $gte: since } } },
+          {
+            $match: {
+              status: "completed",
+              $expr: {
+                $gte: [{ $ifNull: ["$paidAt", "$createdAt"] }, since],
+              },
+            },
+          },
           {
             $group: {
               _id: {
-                $dateToString: { format: "%Y-%m", date: "$createdAt" },
+                $dateToString: {
+                  format: "%Y-%m",
+                  date: { $ifNull: ["$paidAt", "$createdAt"] },
+                },
               },
               amount: { $sum: "$amount" },
               payments: { $sum: 1 },

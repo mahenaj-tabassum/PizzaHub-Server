@@ -134,29 +134,36 @@ export const CreateCheckoutSession = async (req, res, next) => {
       });
     }
 
-    // Check Stripe itself too, in case local subscription data is stale.
+    // Check Stripe itself too, because local subscription data can be stale.
+    // Policy: block a second checkout while any non-terminal subscription
+    // exists. In particular, past_due is blocked while Stripe retries payment.
     if (vendor.stripeCustomerId) {
-      const [activeSubscriptions, trialingSubscriptions] = await Promise.all([
-        stripe.subscriptions.list({
-          customer: vendor.stripeCustomerId,
-          status: "active",
-          limit: 10,
-        }),
-        stripe.subscriptions.list({
-          customer: vendor.stripeCustomerId,
-          status: "trialing",
-          limit: 10,
-        }),
+      const subscriptions = stripe.subscriptions.list({
+        customer: vendor.stripeCustomerId,
+        status: "all",
+        limit: 100,
+      });
+
+      const blockingStatuses = new Set([
+        "active",
+        "trialing",
+        "past_due",
+        "unpaid",
+        "incomplete",
+        "paused",
       ]);
 
-      if (
-        activeSubscriptions.data.length ||
-        trialingSubscriptions.data.length
-      ) {
-        return res.status(409).json({
-          success: false,
-          message: "An active Premium subscription already exists",
-        });
+      for await (const subscription of subscriptions) {
+        if (blockingStatuses.has(subscription.status)) {
+          return res.status(409).json({
+            success: false,
+            message:
+              subscription.status === "past_due"
+                ? "Your existing Premium subscription has a payment issue. Please update the payment method in the billing portal before starting another subscription."
+                : "An existing Premium subscription must be resolved before creating another checkout session.",
+            data: { subscriptionStatus: subscription.status },
+          });
+        }
       }
     }
 

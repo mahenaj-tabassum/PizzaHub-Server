@@ -129,6 +129,15 @@ const createIndexes = async () => {
     },
   );
 
+  await transactions.createIndex(
+    { stripeInvoiceId: 1 },
+    {
+      unique: true,
+      sparse: true,
+      name: "transactions_stripe_invoice_unique",
+    },
+  );
+
   console.log("All PizzaHub database indexes are ready.");
 };
 

@@ -33,21 +33,32 @@ const GetAllMenuItems = async (req, res, next) => {
 
     const menuCollection = await getCollection("menuItems");
 
-    const [items, totalItems] = await Promise.all([
+    // Vendor eligibility must be applied before skip/limit. The count uses
+    // the same eligibility pipeline so pagination metadata matches results.
+    const eligibleVendorStages = vendorLookupStages();
+
+    const [items, countRows] = await Promise.all([
       menuCollection
         .aggregate([
           { $match: query },
+          ...eligibleVendorStages,
           { $sort: sortOption },
           { $skip: pagination.skip },
           { $limit: pagination.limit },
-          // Lookup only for the items on this page.
-          ...vendorLookupStages(),
           ...vendorShapeStages,
         ])
         .toArray(),
 
-      menuCollection.countDocuments(query),
+      menuCollection
+        .aggregate([
+          { $match: query },
+          ...vendorLookupStages(),
+          { $count: "totalItems" },
+        ])
+        .toArray(),
     ]);
+
+    const totalItems = countRows[0]?.totalItems || 0;
 
     const totalPages = Math.ceil(totalItems / pagination.limit);
 
@@ -173,3 +184,4 @@ export {
   GetSingleMenuItem,
   GetMenuLocations,
 };
+w

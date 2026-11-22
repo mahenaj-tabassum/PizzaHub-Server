@@ -152,6 +152,7 @@ export const upsertSubscriptionTransaction = async ({
   amount,
   currency,
   status,
+  paidAt,
   eventId,
 }) => {
   const transactions = await getCollection("transactions");
@@ -173,6 +174,9 @@ export const upsertSubscriptionTransaction = async ({
   if (customerId) update.$set.stripeCustomerId = customerId;
   if (typeof amount === "number") update.$set.amount = amount;
   if (currency) update.$set.currency = currency.toLowerCase();
+  if (paidAt instanceof Date && !Number.isNaN(paidAt.getTime())) {
+    update.$set.paidAt = paidAt;
+  }
   if (eventId) update.$set.lastStripeEventId = eventId;
 
   const run = () =>

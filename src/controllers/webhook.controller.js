@@ -2,7 +2,6 @@ import stripe from "../config/stripe.js";
 import { getCollection } from "../config/db.js";
 import {
   findVendorIdBySubscription,
-  isSubscriptionActive,
   updateVendorSubscription,
   upsertSubscriptionTransaction,
 } from "../services/subscription.service.js";
@@ -98,7 +97,7 @@ const syncSubscription = async (subscriptionId, vendorIdHint = null) => {
   return { subscription, vendorId };
 };
 
-const handleCheckoutCompleted = async (session, eventId) => {
+const handleCheckoutCompleted = async (session, eventId, eventCreatedAt) => {
   if (session.mode !== "subscription") return;
 
   // Never activate Premium unless Stripe says the session is paid.
@@ -116,7 +115,7 @@ const handleCheckoutCompleted = async (session, eventId) => {
     throw new Error("Checkout session is missing subscription metadata");
   }
 
-  const { subscription } = await syncSubscription(subscriptionId, vendorId);
+  await syncSubscription(subscriptionId, vendorId);
 
   await upsertSubscriptionTransaction({
     vendorId,
@@ -125,7 +124,11 @@ const handleCheckoutCompleted = async (session, eventId) => {
     customerId: getId(session.customer),
     amount: session.amount_total,
     currency: session.currency,
-    status: isSubscriptionActive(subscription.status) ? "completed" : "failed",
+    // Checkout payment success is independent of the subscription lifecycle.
+    status: "completed",
+    paidAt: Number.isFinite(eventCreatedAt)
+      ? new Date(eventCreatedAt * 1000)
+      : new Date(),
     eventId,
   });
 };
@@ -184,11 +187,68 @@ const handleSubscriptionEvent = async (eventSubscription) => {
   await syncSubscription(eventSubscription.id);
 };
 
-const handleInvoiceEvent = async (invoice) => {
+const handleInvoiceEvent = async (invoice, eventType, eventId) => {
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   if (!subscriptionId) return;
 
-  await syncSubscription(subscriptionId);
+  const { vendorId, subscription } = await syncSubscription(subscriptionId);
+  const transactions = await getCollection("transactions");
+  const succeeded = eventType === "invoice.payment_succeeded";
+  const amount = succeeded
+    ? typeof invoice.amount_paid === "number"
+      ? invoice.amount_paid
+      : 0
+    : typeof invoice.amount_due === "number"
+      ? invoice.amount_due
+      : 0;
+  const transactionDateSeconds = succeeded
+    ? invoice.status_transitions?.paid_at
+    : invoice.created;
+  const createdAt = Number.isFinite(transactionDateSeconds)
+    ? new Date(transactionDateSeconds * 1000)
+    : new Date();
+
+  // Every recurring invoice is a distinct payment attempt. The unique
+  // stripeInvoiceId index makes retries and duplicate webhook deliveries safe.
+  const update = {
+    $set: {
+      vendorId: String(vendorId),
+      plan: "premium",
+      status: succeeded ? "completed" : "failed",
+      stripeInvoiceId: invoice.id,
+      stripeSubscriptionId: subscriptionId,
+      stripeCustomerId: getId(invoice.customer) || getId(subscription.customer),
+      amount,
+      currency: (invoice.currency || "usd").toLowerCase(),
+      ...(succeeded ? { paidAt: createdAt } : {}),
+      billingReason: invoice.billing_reason || null,
+      hostedInvoiceUrl: invoice.hosted_invoice_url || null,
+      invoiceNumber: invoice.number || null,
+      lastStripeEventId: eventId,
+      updatedAt: new Date(),
+    },
+    $setOnInsert: { createdAt },
+  };
+
+  const invoiceFilter = succeeded
+    ? { stripeInvoiceId: invoice.id }
+    : { stripeInvoiceId: invoice.id, status: { $ne: "completed" } };
+
+  try {
+    await transactions.updateOne(invoiceFilter, update, { upsert: true });
+  } catch (error) {
+    // A late invoice.payment_failed event must never downgrade an invoice
+    // already recorded as paid. The upsert can hit the unique invoice index
+    // because the completed row intentionally does not match the filter.
+    if (error.code !== 11000 || succeeded) throw error;
+
+    const existing = await transactions.findOne(
+      { stripeInvoiceId: invoice.id },
+      { projection: { status: 1 } },
+    );
+
+    if (existing?.status !== "completed") throw error;
+  }
 };
 
 export const HandleStripeWebhook = async (req, res) => {
@@ -241,7 +301,11 @@ export const HandleStripeWebhook = async (req, res) => {
     switch (event.type) {
       case "checkout.session.completed":
       case "checkout.session.async_payment_succeeded":
-        await handleCheckoutCompleted(event.data.object, event.id);
+        await handleCheckoutCompleted(
+          event.data.object,
+          event.id,
+          event.created,
+        );
         break;
 
       case "checkout.session.async_payment_failed":
@@ -263,7 +327,7 @@ export const HandleStripeWebhook = async (req, res) => {
 
       case "invoice.payment_succeeded":
       case "invoice.payment_failed":
-        await handleInvoiceEvent(event.data.object);
+        await handleInvoiceEvent(event.data.object, event.type, event.id);
         break;
 
       default:
