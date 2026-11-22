@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { imageUrlSchema, PROFILE_IMAGE_HOSTS } from "../utils/imageUrl.js";
 
 const profileFields = {
   name: z
@@ -8,9 +9,8 @@ const profileFields = {
     .max(100, "Name cannot exceed 100 characters")
     .optional(),
 
-  image: z
-    .union([z.string().trim().url("Image must be a valid URL"), z.null()])
-    .optional(),
+  // null = ছবি মুছে ফেলা। নইলে শুধু আমাদের ImgBB আপলোড।
+  image: z.union([imageUrlSchema(PROFILE_IMAGE_HOSTS), z.null()]).optional(),
 
   businessName: z
     .string()

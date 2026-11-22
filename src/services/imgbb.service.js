@@ -1,4 +1,5 @@
 import ApiError from "../utils/ApiError.js";
+import { isAllowedImageUrl, MENU_IMAGE_HOSTS } from "../utils/imageUrl.js";
 
 const IMGBB_API_URL = "https://api.imgbb.com/1/upload";
 
@@ -48,6 +49,12 @@ const uploadToImgBB = async (file) => {
 
   if (!response.ok || !result?.success || !result?.data?.url) {
     throw new ApiError(502, result?.error?.message || "Image upload failed");
+  }
+
+  // ImgBB অপ্রত্যাশিত হোস্ট দিলে এখনই থামানো, যাতে পরে পেজ না ভাঙে
+  if (!isAllowedImageUrl(result.data.url, MENU_IMAGE_HOSTS)) {
+    console.error("ImgBB returned an unexpected image host:", result.data.url);
+    throw new ApiError(502, "Image upload returned an unsupported URL");
   }
 
   return {

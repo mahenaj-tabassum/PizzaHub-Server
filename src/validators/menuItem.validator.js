@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CATEGORIES } from "../utils/constants.js";
+import { imageUrlSchema, MENU_IMAGE_HOSTS } from "../utils/imageUrl.js";
 
 const menuItemFields = {
   itemName: z
@@ -28,8 +29,9 @@ const menuItemFields = {
     .min(2, "Location is required")
     .max(150, "Location cannot exceed 150 characters"),
 
+  // শুধু https এবং অনুমোদিত হোস্ট (next/image এর সাথে মিল রেখে)
   images: z
-    .array(z.string().url("Each image must be a valid URL"))
+    .array(imageUrlSchema(MENU_IMAGE_HOSTS))
     .min(1, "At least one image is required")
     .max(5, "Maximum 5 images are allowed"),
 };

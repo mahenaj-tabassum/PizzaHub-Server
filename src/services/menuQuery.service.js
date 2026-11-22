@@ -26,6 +26,7 @@ const escapeRegex = (value) => {
 };
 
 // Validate optional text query parameters.
+// An empty or whitespace-only value is treated as "not provided".
 const validateText = (value, fieldName, maxLength = 100) => {
   if (value === undefined) return undefined;
 
@@ -35,9 +36,8 @@ const validateText = (value, fieldName, maxLength = 100) => {
 
   const trimmedValue = value.trim();
 
-  if (!trimmedValue) {
-    throw new MenuQueryValidationError(`${fieldName} cannot be empty`);
-  }
+  // Ignore the filter instead of failing the whole request.
+  if (!trimmedValue) return undefined;
 
   if (trimmedValue.length > maxLength) {
     throw new MenuQueryValidationError(
@@ -114,7 +114,8 @@ const buildMenuQuery = ({ q, category, location }) => {
 
 // Return supported MongoDB sort object.
 const getMenuSort = (sort) => {
-  if (sort === undefined) {
+  // Missing or empty sort means "newest first".
+  if (sort === undefined || sort === "") {
     return { createdAt: -1, _id: -1 };
   }
 
@@ -132,7 +133,7 @@ const getMenuSort = (sort) => {
       return { price: -1, _id: -1 };
 
     default:
-      return { createdAt: -1 };
+      return { createdAt: -1, _id: -1 };
   }
 };
 

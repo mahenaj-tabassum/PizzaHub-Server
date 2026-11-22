@@ -23,7 +23,7 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests without Origin (e.g. server-to-server)
+ 
     if (!origin) {
       return callback(null, true);
     }
@@ -32,7 +32,7 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+    return callback(null, false);
   },
 
   credentials: true,
