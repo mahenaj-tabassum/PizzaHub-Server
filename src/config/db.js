@@ -1,9 +1,10 @@
-// src/config/db.js
+// One MongoClient per Node.js process / warm Vercel function instance.
+// Reuse the same connection pool across every request. Never close it per request.
 
 import { MongoClient } from "mongodb";
 
-const uri = process.env.MONGODB_URI;
-const dbName = process.env.DB_NAME;
+const uri = process.env.MONGODB_URI?.trim();
+const dbName = process.env.DB_NAME?.trim();
 
 if (!uri) {
   throw new Error("MONGODB_URI is missing from environment variables");
@@ -24,71 +25,68 @@ if (!globalMongo.__pizzaHubMongo) {
 
 const mongo = globalMongo.__pizzaHubMongo;
 
-const createClient = () => {
-  return new MongoClient(uri, {
+const createClient = () =>
+  new MongoClient(uri, {
     maxPoolSize: 10,
     minPoolSize: 0,
-    maxIdleTimeMS: 60000,
-    serverSelectionTimeoutMS: 15000,
-    connectTimeoutMS: 15000,
-    socketTimeoutMS: 45000,
+    maxIdleTimeMS: 60_000,
+    serverSelectionTimeoutMS: 15_000,
+    connectTimeoutMS: 15_000,
+    socketTimeoutMS: 45_000,
     retryWrites: true,
   });
-};
 
-const connectToMongoDB = async () => {
+export const connectToMongoDB = async () => {
   if (mongo.client) {
     return mongo.client.db(dbName);
   }
 
   if (!mongo.promise) {
-    const newClient = createClient();
+    const client = createClient();
 
-    mongo.promise = newClient
+    const connectionPromise = client
       .connect()
-      .then(() => {
-        mongo.client = newClient;
-        return newClient;
+      .then((connectedClient) => {
+        mongo.client = connectedClient;
+        return connectedClient;
       })
       .catch(async (error) => {
-        mongo.client = null;
-        mongo.promise = null;
+        // Reset only this failed attempt. A later request can retry.
+        if (mongo.promise === connectionPromise) {
+          mongo.promise = null;
+        }
 
-        await newClient.close().catch(() => {});
+        if (mongo.client === client) {
+          mongo.client = null;
+        }
 
+        await client.close().catch(() => {});
         console.error("MongoDB connection failed:", error.message);
         throw error;
       });
+
+    mongo.promise = connectionPromise;
   }
 
-  const connectedClient = await mongo.promise;
-
-  return connectedClient.db(dbName);
+  const client = await mongo.promise;
+  return client.db(dbName);
 };
 
-const getMongoClient = async () => {
+export const getMongoClient = async () => {
   await connectToMongoDB();
+
+  if (!mongo.client) {
+    throw new Error("MongoDB client is not available after connection");
+  }
 
   return mongo.client;
 };
 
-const getCollection = async (collectionName) => {
-  const database = await connectToMongoDB();
+export const getCollection = async (collectionName) => {
+  if (typeof collectionName !== "string" || !collectionName.trim()) {
+    throw new TypeError("A valid MongoDB collection name is required");
+  }
 
+  const database = await connectToMongoDB();
   return database.collection(collectionName);
 };
-
-// Only use this when intentionally shutting down,
-// such as the database index creation script.
-const closeDB = async () => {
-  const currentClient = mongo.client;
-
-  mongo.client = null;
-  mongo.promise = null;
-
-  if (currentClient) {
-    await currentClient.close();
-  }
-};
-
-export { connectToMongoDB, getMongoClient, getCollection, closeDB };

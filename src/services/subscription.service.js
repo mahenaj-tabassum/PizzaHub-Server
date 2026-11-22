@@ -56,6 +56,7 @@ export const updateVendorSubscription = async ({
   customerId,
   status,
   currentPeriodEnd,
+  subscriptionCreatedAt,
 }) => {
   if (!vendorId) {
     throw new Error("Vendor ID is required");
@@ -64,7 +65,10 @@ export const updateVendorSubscription = async ({
   const users = await getCollection("users");
 
   const vendor = await users.findOne(buildVendorQuery(String(vendorId)), {
-    projection: { stripeSubscriptionId: 1 },
+    projection: {
+      stripeSubscriptionId: 1,
+      stripeSubscriptionCreatedAt: 1,
+    },
   });
 
   if (!vendor) {
@@ -72,6 +76,23 @@ export const updateVendorSubscription = async ({
   }
 
   const isActive = isSubscriptionActive(status);
+
+  // Ignore events from an older subscription after a newer subscription has
+  // already become the vendor's current subscription.
+  const incomingCreatedAt = Number.isFinite(subscriptionCreatedAt)
+    ? new Date(subscriptionCreatedAt * 1000)
+    : null;
+  const storedCreatedAt = vendor.stripeSubscriptionCreatedAt
+    ? new Date(vendor.stripeSubscriptionCreatedAt)
+    : null;
+
+  if (
+    incomingCreatedAt &&
+    storedCreatedAt &&
+    incomingCreatedAt < storedCreatedAt
+  ) {
+    return { skipped: true, reason: "stale_subscription_event" };
+  }
 
   // Without a period end Premium could never be activated safely.
   // Throwing makes Stripe retry the event and keeps the error visible.
@@ -88,23 +109,37 @@ export const updateVendorSubscription = async ({
     return { skipped: true };
   }
 
-  await users.updateOne(
-    { _id: vendor._id },
-    {
-      $set: {
-        subscriptionPlan: isActive
-          ? SUBSCRIPTION_PLANS.PREMIUM
-          : SUBSCRIPTION_PLANS.FREE,
-        subscriptionStatus: status || "inactive",
-        subscriptionExpiresAt: isActive
-          ? new Date(currentPeriodEnd * 1000)
-          : null,
-        stripeSubscriptionId: subscriptionId || null,
-        stripeCustomerId: customerId || null,
-        updatedAt: new Date(),
-      },
+  const updateFilter = { _id: vendor._id };
+
+  // Make the stale-event guard atomic. Two webhook requests can run at the
+  // same time, so a pre-read check alone is not sufficient.
+  if (incomingCreatedAt) {
+    updateFilter.$or = [
+      { stripeSubscriptionCreatedAt: { $exists: false } },
+      { stripeSubscriptionCreatedAt: { $lte: incomingCreatedAt } },
+    ];
+  }
+
+  const updateResult = await users.updateOne(updateFilter, {
+    $set: {
+      subscriptionPlan: isActive
+        ? SUBSCRIPTION_PLANS.PREMIUM
+        : SUBSCRIPTION_PLANS.FREE,
+      subscriptionStatus: status || "inactive",
+      subscriptionExpiresAt: isActive
+        ? new Date(currentPeriodEnd * 1000)
+        : null,
+      stripeSubscriptionId: subscriptionId || null,
+      stripeSubscriptionCreatedAt:
+        incomingCreatedAt || vendor.stripeSubscriptionCreatedAt || null,
+      stripeCustomerId: customerId || null,
+      updatedAt: new Date(),
     },
-  );
+  });
+
+  if (updateResult.matchedCount !== 1) {
+    return { skipped: true, reason: "stale_subscription_event" };
+  }
 
   return { skipped: false };
 };

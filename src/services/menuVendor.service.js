@@ -14,9 +14,14 @@ export const vendorLookupStages = (now = new Date()) => [
         {
           $match: {
             $expr: {
-              $or: [
-                { $eq: ["$id", "$$itemVendorId"] },
-                { $eq: [{ $toString: "$_id" }, "$$itemVendorId"] },
+              $and: [
+                { $ne: ["$isBlocked", true] },
+                {
+                  $or: [
+                    { $eq: ["$id", "$$itemVendorId"] },
+                    { $eq: [{ $toString: "$_id" }, "$$itemVendorId"] },
+                  ],
+                },
               ],
             },
           },
@@ -35,6 +40,8 @@ export const vendorLookupStages = (now = new Date()) => [
     },
   },
   { $addFields: { vendor: { $arrayElemAt: ["$vendor", 0] } } },
+  // Do not expose menu items belonging to a blocked or deleted vendor.
+  { $match: { vendor: { $ne: null } } },
   {
     // Premium must not be expired.
     $addFields: {

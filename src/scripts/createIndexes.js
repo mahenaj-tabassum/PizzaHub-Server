@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { connectToMongoDB, closeDB } from "../config/db.js";
+import { connectToMongoDB, getMongoClient } from "../config/db.js";
 
 const ensureUniqueEmailIndex = async (database) => {
   const collection = database.collection("users");
@@ -132,11 +132,24 @@ const createIndexes = async () => {
   console.log("All PizzaHub database indexes are ready.");
 };
 
+let client;
+
 try {
+  client = await getMongoClient();
   await createIndexes();
 } catch (error) {
   console.error("Index creation failed:", error);
   process.exitCode = 1;
 } finally {
-  await closeDB();
+  // This is a one-off CLI process, not an API request. Close its own client
+  // so the command exits cleanly. Runtime routes never close the shared pool.
+  if (client) {
+    await client.close().catch((error) => {
+      console.error(
+        "Could not close index-script MongoDB client:",
+        error.message,
+      );
+      process.exitCode = 1;
+    });
+  }
 }

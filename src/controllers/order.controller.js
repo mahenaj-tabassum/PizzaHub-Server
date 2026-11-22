@@ -70,7 +70,7 @@ export const CreateOrder = async (req, res, next) => {
     // 3. Verify that the referenced vendor still exists.
     const vendor = await findVendorById(usersCollection, vendorId);
 
-    if (!vendor) {
+    if (!vendor || vendor.isBlocked === true) {
       return res.status(409).json({
         success: false,
         message: "The vendor for this menu item is no longer available",

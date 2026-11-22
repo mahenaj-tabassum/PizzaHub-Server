@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import stripe from "../config/stripe.js";
 import { getCollection } from "../config/db.js";
 
@@ -21,12 +22,52 @@ const isPremiumActive = (vendor) => {
 
 // POST /api/payment/checkout
 export const CreateCheckoutSession = async (req, res, next) => {
+  const vendor = req.user;
+  const vendorId = getVendorId(vendor);
+  const priceId = process.env.STRIPE_PREMIUM_PRICE_ID;
+  const clientUrl = process.env.CLIENT_URL?.replace(/\/+$/, "");
+
+  if (!priceId || !clientUrl) {
+    return res.status(500).json({
+      success: false,
+      message: "Payment configuration is missing",
+    });
+  }
+
+  const users = await getCollection("users");
+  const transactions = await getCollection("transactions");
+  const lockToken = randomUUID();
+  const now = new Date();
+  const lockUntil = new Date(now.getTime() + 5 * 60 * 1000);
+
+  // Atomically allow only one checkout-creation request per vendor.
+  // The lock expires if a serverless invocation is terminated unexpectedly.
+  const lockResult = await users.updateOne(
+    {
+      _id: vendor._id,
+      $or: [
+        { premiumCheckoutLockUntil: { $exists: false } },
+        { premiumCheckoutLockUntil: { $lte: now } },
+      ],
+    },
+    {
+      $set: {
+        premiumCheckoutLockToken: lockToken,
+        premiumCheckoutLockUntil: lockUntil,
+      },
+    },
+  );
+
+  if (lockResult.matchedCount !== 1) {
+    return res.status(409).json({
+      success: false,
+      message: "A Premium checkout request is already being processed",
+    });
+  }
+
   let session;
 
   try {
-    const vendor = req.user;
-    const vendorId = getVendorId(vendor);
-
     if (isPremiumActive(vendor)) {
       return res.status(409).json({
         success: false,
@@ -34,14 +75,54 @@ export const CreateCheckoutSession = async (req, res, next) => {
       });
     }
 
-    const priceId = process.env.STRIPE_PREMIUM_PRICE_ID;
-    const clientUrl = process.env.CLIENT_URL?.replace(/\/+$/, "");
+    // Reuse an existing open Checkout Session instead of creating another
+    // subscription when the vendor retries or double-clicks.
+    const pendingTransaction = await transactions.findOne(
+      {
+        vendorId,
+        status: "pending",
+        stripeSessionId: { $type: "string" },
+      },
+      { sort: { createdAt: -1 } },
+    );
 
-    if (!priceId || !clientUrl) {
-      return res.status(500).json({
-        success: false,
-        message: "Payment configuration is missing",
-      });
+    if (pendingTransaction) {
+      const pendingSession = await stripe.checkout.sessions.retrieve(
+        pendingTransaction.stripeSessionId,
+      );
+
+      if (pendingSession.status === "open" && pendingSession.url) {
+        return res.status(200).json({
+          success: true,
+          message: "An existing checkout session is ready",
+          data: {
+            checkoutUrl: pendingSession.url,
+            sessionId: pendingSession.id,
+          },
+        });
+      }
+
+      if (pendingSession.status === "complete") {
+        return res.status(409).json({
+          success: false,
+          message: "Your payment is being confirmed. Please refresh shortly.",
+        });
+      }
+
+      if (pendingSession.status === "expired") {
+        await transactions.updateOne(
+          {
+            _id: pendingTransaction._id,
+            status: "pending",
+          },
+          {
+            $set: {
+              status: "expired",
+              updatedAt: new Date(),
+            },
+          },
+        );
+      }
     }
 
     const price = await stripe.prices.retrieve(priceId);
@@ -55,19 +136,23 @@ export const CreateCheckoutSession = async (req, res, next) => {
 
     // Check Stripe itself too, in case local subscription data is stale.
     if (vendor.stripeCustomerId) {
-      const subscriptions = await stripe.subscriptions.list({
-        customer: vendor.stripeCustomerId,
-        status: "active",
-        limit: 10,
-      });
+      const [activeSubscriptions, trialingSubscriptions] = await Promise.all([
+        stripe.subscriptions.list({
+          customer: vendor.stripeCustomerId,
+          status: "active",
+          limit: 10,
+        }),
+        stripe.subscriptions.list({
+          customer: vendor.stripeCustomerId,
+          status: "trialing",
+          limit: 10,
+        }),
+      ]);
 
-      const trialing = await stripe.subscriptions.list({
-        customer: vendor.stripeCustomerId,
-        status: "trialing",
-        limit: 10,
-      });
-
-      if (subscriptions.data.length || trialing.data.length) {
+      if (
+        activeSubscriptions.data.length ||
+        trialingSubscriptions.data.length
+      ) {
         return res.status(409).json({
           success: false,
           message: "An active Premium subscription already exists",
@@ -78,21 +163,17 @@ export const CreateCheckoutSession = async (req, res, next) => {
     const params = {
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
-
       client_reference_id: vendorId,
-
       metadata: {
         vendorId,
         plan: "premium",
       },
-
       subscription_data: {
         metadata: {
           vendorId,
           plan: "premium",
         },
       },
-
       success_url: `${clientUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${clientUrl}/payment/cancel`,
     };
@@ -103,9 +184,9 @@ export const CreateCheckoutSession = async (req, res, next) => {
       params.customer_email = vendor.email;
     }
 
-    session = await stripe.checkout.sessions.create(params);
-
-    const transactions = await getCollection("transactions");
+    session = await stripe.checkout.sessions.create(params, {
+      idempotencyKey: `premium-checkout-${vendorId}-${lockToken}`,
+    });
 
     await transactions.updateOne(
       { stripeSessionId: session.id },
@@ -147,7 +228,27 @@ export const CreateCheckoutSession = async (req, res, next) => {
       }
     }
 
-    next(error);
+    return next(error);
+  } finally {
+    await users
+      .updateOne(
+        {
+          _id: vendor._id,
+          premiumCheckoutLockToken: lockToken,
+        },
+        {
+          $unset: {
+            premiumCheckoutLockToken: "",
+            premiumCheckoutLockUntil: "",
+          },
+        },
+      )
+      .catch((error) => {
+        console.error(
+          "Could not release Premium checkout lock:",
+          error.message,
+        );
+      });
   }
 };
 

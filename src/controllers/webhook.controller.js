@@ -92,6 +92,7 @@ const syncSubscription = async (subscriptionId, vendorIdHint = null) => {
     customerId: getId(subscription.customer),
     status: subscription.status,
     currentPeriodEnd: getPeriodEnd(subscription),
+    subscriptionCreatedAt: subscription.created,
   });
 
   return { subscription, vendorId };
@@ -131,18 +132,52 @@ const handleCheckoutCompleted = async (session, eventId) => {
 
 // Expired / failed checkout. A completed payment is never overwritten.
 const handleCheckoutNotCompleted = async (session, eventId, status) => {
+  const vendorId = session.metadata?.vendorId || session.client_reference_id;
+
+  if (!vendorId) {
+    throw new Error("Checkout session is missing vendor information");
+  }
+
   const transactions = await getCollection("transactions");
 
-  await transactions.updateOne(
-    { stripeSessionId: session.id, status: { $ne: "completed" } },
-    {
-      $set: {
-        status,
-        lastStripeEventId: eventId,
-        updatedAt: new Date(),
+  try {
+    // Stripe may deliver this event before the API request saves its pending
+    // transaction. Upsert so the event is not silently lost.
+    await transactions.updateOne(
+      {
+        stripeSessionId: session.id,
+        status: { $ne: "completed" },
       },
-    },
-  );
+      {
+        $set: {
+          status,
+          lastStripeEventId: eventId,
+          updatedAt: new Date(),
+        },
+        $setOnInsert: {
+          vendorId: String(vendorId),
+          plan: "premium",
+          amount: session.amount_total ?? null,
+          currency: session.currency ?? null,
+          stripeSessionId: session.id,
+          stripeSubscriptionId: null,
+          createdAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
+  } catch (error) {
+    // A completed record does not match status != completed, so an upsert can
+    // collide with the unique stripeSessionId index. Leave it untouched.
+    if (error.code !== 11000) throw error;
+
+    const existing = await transactions.findOne(
+      { stripeSessionId: session.id },
+      { projection: { status: 1 } },
+    );
+
+    if (existing?.status !== "completed") throw error;
+  }
 };
 
 const handleSubscriptionEvent = async (eventSubscription) => {

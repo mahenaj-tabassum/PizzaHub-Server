@@ -38,7 +38,7 @@ Express + MongoDB API for the PizzaHub pizza ordering platform. It handles menu 
 ## Installation
 
 ```bash
-git https://github.com/mahenaj-tabassum/PizzaHub-Server.git
+git clone https://github.com/mahenaj-tabassum/PizzaHub-Server.git
 cd PizzaHub-Server
 npm install
 cp .env.example .env
@@ -52,7 +52,6 @@ npm run dev          # nodemon, http://localhost:5000
 npm start            # plain node
 npm run db:indexes   # create indexes (run once per database)
 ```
-
 
 ## Environment Variables
 
@@ -83,7 +82,7 @@ IMGBB_API_KEY=
 
 ## Stripe Webhook Setup
 
-Endpoint URL: `https://https://pizzahub-api-server.vercel.app/api/webhooks/stripe`
+Endpoint URL: `https://pizzahub-api-server.vercel.app/api/webhooks/stripe`
 
 Subscribe to these events:
 
