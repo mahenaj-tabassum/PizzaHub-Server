@@ -217,7 +217,7 @@ export const HandleStripeWebhook = async (req, res) => {
         await handleCheckoutNotCompleted(
           event.data.object,
           event.id,
-          "cancelled",
+          "expired",
         );
         break;
 

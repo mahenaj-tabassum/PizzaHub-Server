@@ -20,7 +20,7 @@ export const TRANSACTION_STATUS = Object.freeze({
   PENDING: "pending",
   COMPLETED: "completed",
   FAILED: "failed",
-  CANCELLED: "cancelled",
+  EXPIRED: "expired",
 });
 
 export const ALLOWED_PUBLIC_ROLES = Object.freeze([
@@ -39,13 +39,14 @@ export const ACTIVE_MENU_ITEM_STATUSES = Object.freeze([
   MENU_ITEM_STATUS.PENDING,
   MENU_ITEM_STATUS.APPROVED,
 ]);
+
 export const CATEGORIES = Object.freeze([
-  "Classic Pizzas",
-  "Vegetarian Pizzas",
-  "Meat Lovers",
-  "Gourmet Pizzas",
-  "Sides & Appetizers",
-  "Beverages & Desserts",
+  "classic",
+  "vegetarian",
+  "meat-lovers",
+  "specialty",
+  "sides",
+  "drinks",
 ]);
 
 export const FREE_VENDOR_ACTIVE_ITEM_LIMIT = 3;
