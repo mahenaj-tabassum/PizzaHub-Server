@@ -184,4 +184,3 @@ export {
   GetSingleMenuItem,
   GetMenuLocations,
 };
-w

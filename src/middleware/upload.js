@@ -19,7 +19,8 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024,
+    // Vercel ফাংশনের রিকোয়েস্ট বডির সীমা ৪.৫MB, তাই ৪MB।
+    fileSize: 4 * 1024 * 1024,
     files: 1,
   },
 });

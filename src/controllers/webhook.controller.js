@@ -191,9 +191,19 @@ const handleInvoiceEvent = async (invoice, eventType, eventId) => {
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   if (!subscriptionId) return;
 
+  // Premium চালু/বন্ধ করা Stripe-এর আসল subscription অবস্থা থেকেই হয়।
   const { vendorId, subscription } = await syncSubscription(subscriptionId);
+
+  // প্রথম পেমেন্ট (সফল বা ব্যর্থ) checkout.session.* ইভেন্টে রেকর্ড হয়
+  // (stripeSessionId দিয়ে)। এখানে আলাদা রো বানালে একই পেমেন্ট দুবার
+  // গণনা হবে, তাই শুধু রিনিউয়াল ইনভয়েস রেকর্ড করা হয়।
+  if (invoice.billing_reason === "subscription_create") {
+    return;
+  }
+
   const transactions = await getCollection("transactions");
   const succeeded = eventType === "invoice.payment_succeeded";
+
   const amount = succeeded
     ? typeof invoice.amount_paid === "number"
       ? invoice.amount_paid
@@ -201,15 +211,17 @@ const handleInvoiceEvent = async (invoice, eventType, eventId) => {
     : typeof invoice.amount_due === "number"
       ? invoice.amount_due
       : 0;
+
   const transactionDateSeconds = succeeded
     ? invoice.status_transitions?.paid_at
     : invoice.created;
+
   const createdAt = Number.isFinite(transactionDateSeconds)
     ? new Date(transactionDateSeconds * 1000)
     : new Date();
 
-  // Every recurring invoice is a distinct payment attempt. The unique
-  // stripeInvoiceId index makes retries and duplicate webhook deliveries safe.
+  // প্রতিটি রিনিউয়াল ইনভয়েস আলাদা পেমেন্ট। unique stripeInvoiceId index
+  // থাকায় retry বা duplicate webhook নিরাপদ।
   const update = {
     $set: {
       vendorId: String(vendorId),
@@ -237,9 +249,7 @@ const handleInvoiceEvent = async (invoice, eventType, eventId) => {
   try {
     await transactions.updateOne(invoiceFilter, update, { upsert: true });
   } catch (error) {
-    // A late invoice.payment_failed event must never downgrade an invoice
-    // already recorded as paid. The upsert can hit the unique invoice index
-    // because the completed row intentionally does not match the filter.
+    // দেরিতে আসা invoice.payment_failed যেন পরিশোধিত রো ডাউনগ্রেড না করে।
     if (error.code !== 11000 || succeeded) throw error;
 
     const existing = await transactions.findOne(

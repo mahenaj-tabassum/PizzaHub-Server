@@ -5,7 +5,7 @@ const isProduction = process.env.NODE_ENV === "production";
 
 // User-friendly messages for upload errors.
 const MULTER_MESSAGES = {
-  LIMIT_FILE_SIZE: "Image is too large. Maximum size is 5MB",
+  LIMIT_FILE_SIZE: "Image is too large. Maximum size is 4MB",
   LIMIT_FILE_COUNT: "Only one image can be uploaded at a time",
   LIMIT_UNEXPECTED_FILE: 'Unexpected file field. Upload the image as "image"',
 };
